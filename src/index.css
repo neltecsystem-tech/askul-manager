@@ -1,0 +1,22 @@
+:root {
+  font-family: system-ui, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1f2937;
+  background: #f4f5f7;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled { cursor: not-allowed; opacity: 0.6; }
+
+input, select, textarea { font: inherit; }
+
+h1, h2, h3 { color: #0f172a; }
