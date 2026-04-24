@@ -1,12 +1,15 @@
 import { useState, type FormEvent } from 'react';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 
 export default function LoginPage() {
-  const { signIn } = useAuth();
+  const { signIn, session } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  if (session) return <Navigate to="/" replace />;
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
