@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -41,10 +41,19 @@ const DEFAULT_ITEMS: { key: string; label: string; fallbackAdmin: boolean; fallb
   { key: 'masters/vehicle-days', label: '車建日マスタ', fallbackAdmin: true, fallbackDriver: false },
 ];
 
+const MOBILE_BREAKPOINT = 768;
+
 export default function Layout() {
   const { profile, signOut } = useAuth();
   const isAdmin = profile?.role === 'admin';
   const [permissions, setPermissions] = useState<PagePermission[] | null>(null);
+  const [isMobile, setIsMobile] = useState<boolean>(
+    typeof window !== 'undefined' && window.innerWidth < MOBILE_BREAKPOINT,
+  );
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(
+    typeof window !== 'undefined' && window.innerWidth >= MOBILE_BREAKPOINT,
+  );
+  const location = useLocation();
 
   const loadPermissions = async () => {
     const { data } = await supabase
@@ -61,28 +70,74 @@ export default function Layout() {
     return () => window.removeEventListener('page-permissions-updated', onUpdate);
   }, []);
 
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = window.innerWidth < MOBILE_BREAKPOINT;
+      setIsMobile(mobile);
+      if (!mobile) setSidebarOpen(true);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // モバイルでナビゲーション時にサイドバーを閉じる
+  useEffect(() => {
+    if (isMobile) setSidebarOpen(false);
+  }, [location.pathname, isMobile]);
+
   const items: NavItem[] = (() => {
     if (permissions) {
       return permissions
         .filter((p) => (isAdmin ? p.admin_visible : p.driver_visible))
         .map((p) => ({ to: toPath(p.page_key), label: p.label }));
     }
-    // フォールバック(DB未取得)
     return DEFAULT_ITEMS.filter((i) => (isAdmin ? i.fallbackAdmin : i.fallbackDriver)).map((i) => ({
       to: toPath(i.key),
       label: i.label,
     }));
   })();
 
-  // 設定ページは管理者専用で常に表示
   if (isAdmin) {
     items.push({ to: '/settings', label: '表示ページ設定' });
   }
 
+  const sidebarStyle: CSSProperties = {
+    ...styles.sidebar,
+    ...(isMobile
+      ? {
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: 240,
+          zIndex: 30,
+          transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
+          transition: 'transform 0.2s ease',
+          boxShadow: sidebarOpen ? '2px 0 8px rgba(0,0,0,0.2)' : 'none',
+        }
+      : {}),
+  };
+
   return (
     <div style={styles.root}>
-      <aside style={styles.sidebar}>
-        <div style={styles.sidebarHeader}>アスクル管理</div>
+      {/* モバイル用バックドロップ */}
+      {isMobile && sidebarOpen && (
+        <div style={styles.backdrop} onClick={() => setSidebarOpen(false)} />
+      )}
+
+      <aside style={sidebarStyle}>
+        <div style={styles.sidebarHeader}>
+          <span>アスクル管理</span>
+          {isMobile && (
+            <button
+              style={styles.closeBtn}
+              onClick={() => setSidebarOpen(false)}
+              aria-label="閉じる"
+            >
+              ✕
+            </button>
+          )}
+        </div>
         <nav style={styles.nav}>
           {items.map((item) => (
             <NavLink
@@ -101,7 +156,16 @@ export default function Layout() {
       </aside>
       <div style={styles.main}>
         <header style={styles.header}>
-          <div style={{ fontSize: 13, color: colors.textMuted }}>
+          {isMobile && (
+            <button
+              style={styles.menuBtn}
+              onClick={() => setSidebarOpen(true)}
+              aria-label="メニューを開く"
+            >
+              ☰
+            </button>
+          )}
+          <div style={{ fontSize: 13, color: colors.textMuted, flex: 1 }}>
             {profile?.full_name} ({isAdmin ? '管理者' : 'ドライバー'})
           </div>
           <button onClick={signOut} style={styles.logoutBtn}>
@@ -132,8 +196,19 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 600,
     color: '#fff',
     borderBottom: '1px solid #334155',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  nav: { display: 'flex', flexDirection: 'column', padding: '8px 0' },
+  closeBtn: {
+    background: 'transparent',
+    color: '#fff',
+    border: 'none',
+    fontSize: 18,
+    cursor: 'pointer',
+    padding: '0 4px',
+  },
+  nav: { display: 'flex', flexDirection: 'column', padding: '8px 0', overflow: 'auto' },
   navLink: {
     padding: '10px 16px',
     color: colors.sidebarText,
@@ -148,14 +223,22 @@ const styles: Record<string, CSSProperties> = {
   },
   main: { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 },
   header: {
-    height: 48,
+    minHeight: 48,
     background: '#fff',
     borderBottom: '1px solid ' + colors.borderLight,
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'flex-end',
     gap: 12,
     padding: '0 16px',
+  },
+  menuBtn: {
+    background: 'transparent',
+    border: '1px solid ' + colors.border,
+    borderRadius: 4,
+    fontSize: 18,
+    padding: '4px 10px',
+    cursor: 'pointer',
+    lineHeight: 1,
   },
   logoutBtn: {
     padding: '6px 12px',
@@ -166,4 +249,10 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 13,
   },
   content: { flex: 1, padding: 20, overflow: 'auto' },
+  backdrop: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.5)',
+    zIndex: 20,
+  },
 };
