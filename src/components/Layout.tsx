@@ -110,7 +110,7 @@ export default function Layout() {
           left: 0,
           bottom: 0,
           width: 240,
-          zIndex: 30,
+          zIndex: 10000,
           transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
           transition: 'transform 0.2s ease',
           boxShadow: sidebarOpen ? '2px 0 8px rgba(0,0,0,0.2)' : 'none',
@@ -253,6 +253,6 @@ const styles: Record<string, CSSProperties> = {
     position: 'fixed',
     inset: 0,
     background: 'rgba(0,0,0,0.5)',
-    zIndex: 20,
+    zIndex: 9999,
   },
 };
