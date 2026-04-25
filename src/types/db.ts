@@ -140,14 +140,27 @@ export interface WorkItem {
   created_at: string;
 }
 
+export type IncidentStatus = 'pending_driver' | 'pending_review' | 'approved';
+
+export const incidentStatusLabels: Record<IncidentStatus, string> = {
+  pending_driver: 'ドライバー記入待ち',
+  pending_review: '管理者承認待ち',
+  approved: '承認済',
+};
+
 export interface Incident {
   id: string;
   occurred_at: string; // YYYY-MM-DD
-  reporter_name: string;
+  reporter_name: string | null;
+  target_driver_id: string | null;
+  status: IncidentStatus;
   category: string | null;
   content: string;
   cause: string | null;
   countermeasure: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

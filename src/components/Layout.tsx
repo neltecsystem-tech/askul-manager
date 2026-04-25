@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -53,6 +53,7 @@ export default function Layout() {
   const { profile, signOut } = useAuth();
   const isAdmin = profile?.role === 'admin';
   const [permissions, setPermissions] = useState<PagePermission[] | null>(null);
+  const [pendingIncidents, setPendingIncidents] = useState<number>(0);
   const [isMobile, setIsMobile] = useState<boolean>(
     typeof window !== 'undefined' && window.innerWidth < MOBILE_BREAKPOINT,
   );
@@ -75,6 +76,30 @@ export default function Layout() {
     window.addEventListener('page-permissions-updated', onUpdate);
     return () => window.removeEventListener('page-permissions-updated', onUpdate);
   }, []);
+
+  // 該当ドライバー記入待ち件数
+  useEffect(() => {
+    if (!profile?.id) {
+      setPendingIncidents(0);
+      return;
+    }
+    let cancelled = false;
+    const fetchPending = async () => {
+      const { count } = await supabase
+        .from('incidents')
+        .select('id', { count: 'exact', head: true })
+        .eq('target_driver_id', profile.id)
+        .eq('status', 'pending_driver');
+      if (!cancelled) setPendingIncidents(count ?? 0);
+    };
+    fetchPending();
+    const onUpdate = () => fetchPending();
+    window.addEventListener('incidents-updated', onUpdate);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('incidents-updated', onUpdate);
+    };
+  }, [profile?.id, location.pathname]);
 
   useEffect(() => {
     const onResize = () => {
@@ -180,6 +205,12 @@ export default function Layout() {
           </button>
         </header>
         <main style={styles.content}>
+          {pendingIncidents > 0 && location.pathname !== '/incidents' && (
+            <Link to="/incidents" style={styles.alertBanner}>
+              <span>⚠ 未対応の不具合が {pendingIncidents} 件あります。原因/対策を記入してください。</span>
+              <span style={{ fontSize: 12, opacity: 0.85 }}>→ 不具合登録ページへ</span>
+            </Link>
+          )}
           <Outlet />
         </main>
       </div>
@@ -256,6 +287,20 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 13,
   },
   content: { flex: 1, padding: 20, overflow: 'auto' },
+  alertBanner: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '10px 14px',
+    marginBottom: 16,
+    background: '#fef3c7',
+    border: '2px solid #f59e0b',
+    borderRadius: 6,
+    color: '#92400e',
+    fontWeight: 600,
+    textDecoration: 'none',
+    fontSize: 14,
+  },
   backdrop: {
     position: 'fixed',
     inset: 0,
