@@ -6,10 +6,11 @@ const DOW_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 
 interface Props {
   statement: ClosedPaymentStatement;
+  hideAmounts?: boolean;
 }
 
 const PaymentStatementDocument = forwardRef<HTMLDivElement, Props>(
-  ({ statement }, ref) => {
+  ({ statement, hideAmounts = false }, ref) => {
     const reiwaYear = statement.year - 2018;
     const officeName = statement.driver_snapshot?.office_name ?? '';
     const driverName = statement.driver_snapshot?.full_name ?? '';
@@ -49,10 +50,16 @@ const PaymentStatementDocument = forwardRef<HTMLDivElement, Props>(
             <tr>
               <th style={tableHeader}>日付</th>
               <th style={tableHeader}>曜日</th>
-              <th style={{ ...tableHeader, textAlign: 'right' }}>個建金額</th>
-              <th style={{ ...tableHeader, textAlign: 'right' }}>車建金額</th>
+              {!hideAmounts && (
+                <>
+                  <th style={{ ...tableHeader, textAlign: 'right' }}>個建金額</th>
+                  <th style={{ ...tableHeader, textAlign: 'right' }}>車建金額</th>
+                </>
+              )}
               <th style={{ ...tableHeader, textAlign: 'right' }}>個数</th>
-              <th style={{ ...tableHeader, textAlign: 'right' }}>売上(税抜)</th>
+              {!hideAmounts && (
+                <th style={{ ...tableHeader, textAlign: 'right' }}>売上(税抜)</th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -66,24 +73,30 @@ const PaymentStatementDocument = forwardRef<HTMLDivElement, Props>(
                     {d.getMonth() + 1}月{d.getDate()}日
                   </td>
                   <td style={tableCell}>{DOW_LABELS[r.day_of_week]}</td>
-                  <td style={{ ...tableCell, textAlign: 'right' }}>
-                    {(r.kodate || 0).toLocaleString()}
-                  </td>
-                  <td style={{ ...tableCell, textAlign: 'right' }}>
-                    {(r.vehicle || 0).toLocaleString()}
-                  </td>
+                  {!hideAmounts && (
+                    <>
+                      <td style={{ ...tableCell, textAlign: 'right' }}>
+                        {(r.kodate || 0).toLocaleString()}
+                      </td>
+                      <td style={{ ...tableCell, textAlign: 'right' }}>
+                        {(r.vehicle || 0).toLocaleString()}
+                      </td>
+                    </>
+                  )}
                   <td style={{ ...tableCell, textAlign: 'right' }}>
                     {(r.count || 0).toLocaleString()}
                   </td>
-                  <td
-                    style={{
-                      ...tableCell,
-                      textAlign: 'right',
-                      fontWeight: hasData ? 600 : 400,
-                    }}
-                  >
-                    {(r.subtotal || 0).toLocaleString()}
-                  </td>
+                  {!hideAmounts && (
+                    <td
+                      style={{
+                        ...tableCell,
+                        textAlign: 'right',
+                        fontWeight: hasData ? 600 : 400,
+                      }}
+                    >
+                      {(r.subtotal || 0).toLocaleString()}
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -91,44 +104,57 @@ const PaymentStatementDocument = forwardRef<HTMLDivElement, Props>(
               <td style={tableCell} colSpan={2}>
                 合計
               </td>
-              <td style={{ ...tableCell, textAlign: 'right' }}>
-                {totalKodate.toLocaleString()}
-              </td>
-              <td style={{ ...tableCell, textAlign: 'right' }}>
-                {totalVehicle.toLocaleString()}
-              </td>
+              {!hideAmounts && (
+                <>
+                  <td style={{ ...tableCell, textAlign: 'right' }}>
+                    {totalKodate.toLocaleString()}
+                  </td>
+                  <td style={{ ...tableCell, textAlign: 'right' }}>
+                    {totalVehicle.toLocaleString()}
+                  </td>
+                </>
+              )}
               <td style={{ ...tableCell, textAlign: 'right' }}>
                 {totalQty.toLocaleString()}
               </td>
-              <td style={{ ...tableCell, textAlign: 'right' }}>
-                {grossRevenue.toLocaleString()}
-              </td>
+              {!hideAmounts && (
+                <td style={{ ...tableCell, textAlign: 'right' }}>
+                  {grossRevenue.toLocaleString()}
+                </td>
+              )}
             </tr>
           </tbody>
         </table>
 
-        <div style={styles.calcBox}>
-          <div style={styles.calcTitle}>お支払い額計算</div>
-          <div style={styles.calcGrid}>
-            <span>個建 合計</span>
-            <span style={{ textAlign: 'right' }}>¥{totalKodate.toLocaleString()}</span>
-            <span>車建 合計 (控除対象外)</span>
-            <span style={{ textAlign: 'right' }}>¥{totalVehicle.toLocaleString()}</span>
-            <span>総売上(税抜)</span>
-            <span style={{ textAlign: 'right' }}>¥{grossRevenue.toLocaleString()}</span>
-            <span>控除率 (個建のみ適用)</span>
-            <span style={{ textAlign: 'right' }}>{deductionRate}%</span>
-            <span>控除額</span>
-            <span style={{ textAlign: 'right', color: '#b45309' }}>
-              -¥{deduction.toLocaleString()}
-            </span>
-            <div style={styles.calcDivider} />
-            <span style={{ fontWeight: 700, fontSize: 15 }}>お支払い額</span>
-            <span style={{ textAlign: 'right', fontWeight: 700, fontSize: 15 }}>
-              ¥{payment.toLocaleString()}
-            </span>
+        {hideAmounts ? (
+          <div style={styles.hideNote}>
+            ※ 金額の表示は所属法人での管理となるため、本画面には表示されません。
+            金額は所属法人にてご確認ください。
           </div>
-        </div>
+        ) : (
+          <div style={styles.calcBox}>
+            <div style={styles.calcTitle}>お支払い額計算</div>
+            <div style={styles.calcGrid}>
+              <span>個建 合計</span>
+              <span style={{ textAlign: 'right' }}>¥{totalKodate.toLocaleString()}</span>
+              <span>車建 合計 (控除対象外)</span>
+              <span style={{ textAlign: 'right' }}>¥{totalVehicle.toLocaleString()}</span>
+              <span>総売上(税抜)</span>
+              <span style={{ textAlign: 'right' }}>¥{grossRevenue.toLocaleString()}</span>
+              <span>控除率 (個建のみ適用)</span>
+              <span style={{ textAlign: 'right' }}>{deductionRate}%</span>
+              <span>控除額</span>
+              <span style={{ textAlign: 'right', color: '#b45309' }}>
+                -¥{deduction.toLocaleString()}
+              </span>
+              <div style={styles.calcDivider} />
+              <span style={{ fontWeight: 700, fontSize: 15 }}>お支払い額</span>
+              <span style={{ textAlign: 'right', fontWeight: 700, fontSize: 15 }}>
+                ¥{payment.toLocaleString()}
+              </span>
+            </div>
+          </div>
+        )}
 
         <div style={styles.footer}>
           確定: {new Date(statement.finalized_at).toLocaleString('ja-JP')}
@@ -206,5 +232,14 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 11,
     color: colors.textMuted,
     textAlign: 'right',
+  },
+  hideNote: {
+    marginTop: 20,
+    padding: 12,
+    background: '#fefce8',
+    border: '1px solid #fcd34d',
+    borderRadius: 4,
+    fontSize: 12,
+    color: '#92400e',
   },
 };

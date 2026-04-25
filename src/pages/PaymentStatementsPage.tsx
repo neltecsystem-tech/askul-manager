@@ -52,6 +52,12 @@ export default function PaymentStatementsPage() {
   const isAdmin = profile?.role === 'admin';
   const isOwner = profile?.business_type === 'corporation_owner';
   const canBulkExport = isAdmin || isOwner;
+  // 法人(corporation) / 社員(employee) は金額非表示
+  const hideAmounts =
+    !isAdmin &&
+    !isOwner &&
+    (profile?.business_type === 'corporation' ||
+      profile?.business_type === 'employee');
 
   const load = async () => {
     setLoading(true);
@@ -243,9 +249,13 @@ export default function PaymentStatementsPage() {
                 <tr>
                   <th style={th}>ドライバー</th>
                   {(isAdmin || isOwner) && <th style={th}>所属会社</th>}
-                  <th style={{ ...th, textAlign: 'right' }}>売上(税抜)</th>
-                  <th style={{ ...th, textAlign: 'right' }}>控除額</th>
-                  <th style={{ ...th, textAlign: 'right' }}>支払額</th>
+                  {!hideAmounts && (
+                    <>
+                      <th style={{ ...th, textAlign: 'right' }}>売上(税抜)</th>
+                      <th style={{ ...th, textAlign: 'right' }}>控除額</th>
+                      <th style={{ ...th, textAlign: 'right' }}>支払額</th>
+                    </>
+                  )}
                   <th style={th}>確定日時</th>
                   <th style={{ ...th, width: 120 }}></th>
                 </tr>
@@ -257,15 +267,19 @@ export default function PaymentStatementsPage() {
                     {(isAdmin || isOwner) && (
                       <td style={td}>{s.driver_snapshot?.company_name ?? ''}</td>
                     )}
-                    <td style={{ ...td, textAlign: 'right' }}>
-                      ¥{s.revenue.toLocaleString()}
-                    </td>
-                    <td style={{ ...td, textAlign: 'right', color: '#b45309' }}>
-                      -¥{s.deduction_amount.toLocaleString()}
-                    </td>
-                    <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>
-                      ¥{s.payment_amount.toLocaleString()}
-                    </td>
+                    {!hideAmounts && (
+                      <>
+                        <td style={{ ...td, textAlign: 'right' }}>
+                          ¥{s.revenue.toLocaleString()}
+                        </td>
+                        <td style={{ ...td, textAlign: 'right', color: '#b45309' }}>
+                          -¥{s.deduction_amount.toLocaleString()}
+                        </td>
+                        <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>
+                          ¥{s.payment_amount.toLocaleString()}
+                        </td>
+                      </>
+                    )}
                     <td style={{ ...td, fontSize: 12, color: colors.textMuted }}>
                       {new Date(s.finalized_at).toLocaleString('ja-JP')}
                       {s.modified_at && (
@@ -298,6 +312,7 @@ export default function PaymentStatementsPage() {
       {openStatement && (
         <StatementModal
           statement={openStatement}
+          hideAmounts={hideAmounts}
           onClose={() => setOpenStatement(null)}
         />
       )}
@@ -357,9 +372,11 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function StatementModal({
   statement,
+  hideAmounts,
   onClose,
 }: {
   statement: ClosedPaymentStatement;
+  hideAmounts: boolean;
   onClose: () => void;
 }) {
   const docRef = useRef<HTMLDivElement>(null);
@@ -414,7 +431,11 @@ function StatementModal({
             閉じる
           </button>
         </div>
-        <PaymentStatementDocument ref={docRef} statement={statement} />
+        <PaymentStatementDocument
+          ref={docRef}
+          statement={statement}
+          hideAmounts={hideAmounts}
+        />
       </div>
     </div>
   );
