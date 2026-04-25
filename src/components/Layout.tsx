@@ -18,15 +18,25 @@ function toPath(key: string): string {
   return key === 'dashboard' ? '/' : '/' + key;
 }
 
+// 設定ページに集約された page_key (サイドバーには表示しない。代わりに「⚙ 設定」を1つ表示)
+const SETTINGS_KEYS = new Set([
+  'settings',
+  'shift-schedule-settings',
+  'shift-patterns',
+  'masters/day-types',
+  'masters/special-dates',
+  'masters/work-items',
+  'masters/offices',
+  'masters/size-categories',
+  'masters/courses',
+  'masters/vehicle-days',
+  'drivers',
+]);
+
 // DBが未取得の間の既定
 const DEFAULT_ITEMS: { key: string; label: string; fallbackAdmin: boolean; fallbackDriver: boolean }[] = [
   { key: 'dashboard', label: 'ダッシュボード', fallbackAdmin: true, fallbackDriver: true },
   { key: 'shifts', label: 'シフト', fallbackAdmin: true, fallbackDriver: true },
-  { key: 'shift-schedule-settings', label: 'シフト曜日別コース設定', fallbackAdmin: true, fallbackDriver: false },
-  { key: 'shift-patterns', label: '基本シフトパターン', fallbackAdmin: true, fallbackDriver: false },
-  { key: 'masters/day-types', label: '曜日区分マスタ', fallbackAdmin: true, fallbackDriver: false },
-  { key: 'masters/special-dates', label: '特別日マスタ', fallbackAdmin: true, fallbackDriver: false },
-  { key: 'masters/work-items', label: '稼働項目マスタ', fallbackAdmin: true, fallbackDriver: false },
   { key: 'work-records', label: '稼働登録', fallbackAdmin: true, fallbackDriver: true },
   { key: 'incidents', label: '不具合登録', fallbackAdmin: true, fallbackDriver: true },
   { key: 'courses-map', label: 'コースエリア地図', fallbackAdmin: true, fallbackDriver: false },
@@ -34,11 +44,6 @@ const DEFAULT_ITEMS: { key: string; label: string; fallbackAdmin: boolean; fallb
   { key: 'my-deliveries', label: '自分の配送実績', fallbackAdmin: true, fallbackDriver: true },
   { key: 'expenses', label: '立替金精算', fallbackAdmin: true, fallbackDriver: false },
   { key: 'closing', label: '月次締め/請求', fallbackAdmin: true, fallbackDriver: false },
-  { key: 'drivers', label: 'ドライバー管理', fallbackAdmin: true, fallbackDriver: false },
-  { key: 'masters/offices', label: '営業所マスタ', fallbackAdmin: true, fallbackDriver: false },
-  { key: 'masters/size-categories', label: 'サイズ区分マスタ', fallbackAdmin: true, fallbackDriver: false },
-  { key: 'masters/courses', label: 'コースマスタ', fallbackAdmin: true, fallbackDriver: false },
-  { key: 'masters/vehicle-days', label: '車建日マスタ', fallbackAdmin: true, fallbackDriver: false },
 ];
 
 const MOBILE_BREAKPOINT = 768;
@@ -88,6 +93,7 @@ export default function Layout() {
   const items: NavItem[] = (() => {
     if (permissions) {
       return permissions
+        .filter((p) => !SETTINGS_KEYS.has(p.page_key))
         .filter((p) => (isAdmin ? p.admin_visible : p.driver_visible))
         .map((p) => ({ to: toPath(p.page_key), label: p.label }));
     }
@@ -98,7 +104,7 @@ export default function Layout() {
   })();
 
   if (isAdmin) {
-    items.push({ to: '/settings', label: '表示ページ設定' });
+    items.push({ to: '/settings', label: '⚙ 設定' });
   }
 
   const sidebarStyle: CSSProperties = {

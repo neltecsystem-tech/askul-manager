@@ -23,6 +23,7 @@ import WorkItemsPage from './pages/admin/WorkItemsPage';
 import WorkRecordsPage from './pages/WorkRecordsPage';
 import IncidentsPage from './pages/IncidentsPage';
 import CoursesMapPage from './pages/admin/CoursesMapPage';
+import PagePermissionsPage from './pages/admin/PagePermissionsPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { session, profile, loading } = useAuth();
@@ -86,90 +87,10 @@ export default function App() {
               }
             />
             <Route
-              path="drivers"
-              element={
-                <RequireAdmin>
-                  <DriversPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="masters/offices"
-              element={
-                <RequireAdmin>
-                  <OfficesPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="masters/size-categories"
-              element={
-                <RequireAdmin>
-                  <SizeCategoriesPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="masters/courses"
-              element={
-                <RequireAdmin>
-                  <CoursesPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="masters/vehicle-days"
-              element={
-                <RequireAdmin>
-                  <VehicleDaysPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
               path="courses-map"
               element={
                 <RequireAdmin>
                   <CoursesMapPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="shift-schedule-settings"
-              element={
-                <RequireAdmin>
-                  <ShiftScheduleSettingsPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="shift-patterns"
-              element={
-                <RequireAdmin>
-                  <ShiftPatternsPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="masters/day-types"
-              element={
-                <RequireAdmin>
-                  <DayTypesPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="masters/special-dates"
-              element={
-                <RequireAdmin>
-                  <SpecialDatesPage />
-                </RequireAdmin>
-              }
-            />
-            <Route
-              path="masters/work-items"
-              element={
-                <RequireAdmin>
-                  <WorkItemsPage />
                 </RequireAdmin>
               }
             />
@@ -182,7 +103,19 @@ export default function App() {
                   <SettingsPage />
                 </RequireAdmin>
               }
-            />
+            >
+              <Route path="page-permissions" element={<PagePermissionsPage />} />
+              <Route path="drivers" element={<DriversPage />} />
+              <Route path="offices" element={<OfficesPage />} />
+              <Route path="size-categories" element={<SizeCategoriesPage />} />
+              <Route path="courses" element={<CoursesPage />} />
+              <Route path="vehicle-days" element={<VehicleDaysPage />} />
+              <Route path="day-types" element={<DayTypesPage />} />
+              <Route path="special-dates" element={<SpecialDatesPage />} />
+              <Route path="work-items" element={<WorkItemsPage />} />
+              <Route path="shift-schedule" element={<ShiftScheduleSettingsPage />} />
+              <Route path="shift-patterns" element={<ShiftPatternsPage />} />
+            </Route>
           </Route>
         </Routes>
       </BrowserRouter>

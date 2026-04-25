@@ -1,169 +1,119 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabase';
-import type { PagePermission } from '../../types/db';
-import PageHeader from '../../components/PageHeader';
-import { btn, btnPrimary, card, colors, input, table, td, th } from '../../lib/ui';
+import { NavLink, Outlet, useLocation, Navigate } from 'react-router-dom';
+import { type CSSProperties } from 'react';
+import { colors } from '../../lib/ui';
 
-const ALWAYS_ADMIN_KEYS = new Set(['settings']); // 自分で自分を無効化できないように
+interface SettingItem {
+  to: string;
+  label: string;
+  group: string;
+}
+
+const ITEMS: SettingItem[] = [
+  { to: 'page-permissions', label: '表示ページ設定', group: 'システム' },
+  { to: 'drivers', label: 'ドライバー管理', group: 'システム' },
+  { to: 'offices', label: '営業所マスタ', group: 'マスタ' },
+  { to: 'size-categories', label: 'サイズ区分マスタ', group: 'マスタ' },
+  { to: 'courses', label: 'コースマスタ', group: 'マスタ' },
+  { to: 'vehicle-days', label: '車建日マスタ', group: 'マスタ' },
+  { to: 'day-types', label: '曜日区分マスタ', group: 'マスタ' },
+  { to: 'special-dates', label: '特別日マスタ', group: 'マスタ' },
+  { to: 'work-items', label: '稼働項目マスタ', group: 'マスタ' },
+  { to: 'shift-schedule', label: 'シフト曜日別コース設定', group: 'シフト' },
+  { to: 'shift-patterns', label: '基本シフトパターン', group: 'シフト' },
+];
 
 export default function SettingsPage() {
-  const [rows, setRows] = useState<PagePermission[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const location = useLocation();
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    const { data, error } = await supabase
-      .from('page_permissions')
-      .select('*')
-      .order('sort_order');
-    if (error) setError(error.message);
-    else setRows((data ?? []) as PagePermission[]);
-    setLoading(false);
-    setDirty(false);
-  };
+  if (location.pathname === '/settings' || location.pathname === '/settings/') {
+    return <Navigate to="/settings/page-permissions" replace />;
+  }
 
-  useEffect(() => {
-    load();
-  }, []);
-
-  const toggle = (key: string, field: 'admin_visible' | 'driver_visible') => {
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.page_key !== key) return r;
-        if (field === 'admin_visible' && ALWAYS_ADMIN_KEYS.has(key)) return r; // 必須保護
-        return { ...r, [field]: !r[field] };
-      }),
-    );
-    setDirty(true);
-  };
-
-  const move = (index: number, dir: -1 | 1) => {
-    const target = index + dir;
-    if (target < 0 || target >= rows.length) return;
-    const next = [...rows];
-    [next[index], next[target]] = [next[target], next[index]];
-    setRows(next);
-    setDirty(true);
-  };
-
-  const saveAll = async () => {
-    setSaving(true);
-    setError(null);
-    // sort_order を現在の並び順で再採番 (10刻み)
-    const updates = rows.map((r, i) =>
-      supabase
-        .from('page_permissions')
-        .update({
-          admin_visible: r.admin_visible,
-          driver_visible: r.driver_visible,
-          sort_order: (i + 1) * 10,
-        })
-        .eq('page_key', r.page_key),
-    );
-    const results = await Promise.all(updates);
-    const firstErr = results.find((r) => r.error)?.error;
-    setSaving(false);
-    if (firstErr) {
-      setError(firstErr.message);
-      return;
-    }
-    setDirty(false);
-    await load();
-    window.dispatchEvent(new Event('page-permissions-updated'));
-  };
+  const groups = ITEMS.reduce<Record<string, SettingItem[]>>((acc, item) => {
+    (acc[item.group] ||= []).push(item);
+    return acc;
+  }, {});
 
   return (
-    <div>
-      <PageHeader
-        title="表示ページ設定"
-        actions={
-          <>
-            <button style={btn} onClick={load} disabled={loading || saving}>
-              再読込
-            </button>
-            <button style={btnPrimary} onClick={saveAll} disabled={saving || !dirty}>
-              {saving ? '保存中...' : dirty ? '保存' : '変更なし'}
-            </button>
-          </>
-        }
-      />
-      <div style={{ ...card, marginBottom: 12, fontSize: 12, color: colors.textMuted }}>
-        管理者 / ドライバー それぞれに対し、左メニューに表示するページをチェックで切替できます。
-        チェックを外すとそのロールのユーザーからは非表示になります（直接URL入力でもアクセス時にリダイレクトされる場合があります）。
-        設定後は各ユーザーに**再ログインまたはページ再読込**を案内してください。
+    <div style={styles.root}>
+      <aside style={styles.sidebar}>
+        <div style={styles.title}>設定</div>
+        {Object.entries(groups).map(([group, items]) => (
+          <div key={group} style={styles.group}>
+            <div style={styles.groupLabel}>{group}</div>
+            {items.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                style={({ isActive }) => ({
+                  ...styles.link,
+                  ...(isActive ? styles.linkActive : {}),
+                })}
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </div>
+        ))}
+      </aside>
+      <div style={styles.content}>
+        <Outlet />
       </div>
-
-      {error && <div style={{ color: '#dc2626', marginBottom: 12 }}>{error}</div>}
-
-      <div style={card}>
-        {loading ? (
-          <div>読み込み中...</div>
-        ) : (
-          <table style={table}>
-            <thead>
-              <tr>
-                <th style={{ ...th, textAlign: 'center', width: 80 }}>並替</th>
-                <th style={th}>ページ</th>
-                <th style={th}>page_key</th>
-                <th style={{ ...th, textAlign: 'center', width: 100 }}>管理者に表示</th>
-                <th style={{ ...th, textAlign: 'center', width: 130 }}>ドライバーに表示</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={r.page_key}>
-                  <td style={{ ...td, textAlign: 'center', whiteSpace: 'nowrap' }}>
-                    <button
-                      style={{ ...btn, padding: '2px 6px', fontSize: 12, marginRight: 2 }}
-                      onClick={() => move(i, -1)}
-                      disabled={i === 0}
-                      title="上へ"
-                    >
-                      ▲
-                    </button>
-                    <button
-                      style={{ ...btn, padding: '2px 6px', fontSize: 12 }}
-                      onClick={() => move(i, 1)}
-                      disabled={i === rows.length - 1}
-                      title="下へ"
-                    >
-                      ▼
-                    </button>
-                  </td>
-                  <td style={td}>{r.label}</td>
-                  <td style={{ ...td, fontSize: 11, color: '#6b7280' }}>
-                    /{r.page_key === 'dashboard' ? '' : r.page_key}
-                  </td>
-                  <td style={{ ...td, textAlign: 'center' }}>
-                    <input
-                      type="checkbox"
-                      checked={r.admin_visible}
-                      disabled={ALWAYS_ADMIN_KEYS.has(r.page_key)}
-                      onChange={() => toggle(r.page_key, 'admin_visible')}
-                    />
-                  </td>
-                  <td style={{ ...td, textAlign: 'center' }}>
-                    <input
-                      type="checkbox"
-                      checked={r.driver_visible}
-                      onChange={() => toggle(r.page_key, 'driver_visible')}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* unused to suppress lint */}
-      <span style={{ display: 'none' }}>
-        {input && null}
-      </span>
     </div>
   );
 }
+
+const styles: Record<string, CSSProperties> = {
+  root: {
+    display: 'flex',
+    gap: 16,
+    alignItems: 'flex-start',
+    minHeight: '100%',
+  },
+  sidebar: {
+    flexShrink: 0,
+    width: 200,
+    background: colors.surface,
+    border: '1px solid ' + colors.borderLight,
+    borderRadius: 6,
+    padding: '12px 0',
+    position: 'sticky',
+    top: 0,
+  },
+  title: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: colors.text,
+    padding: '4px 16px 12px',
+    borderBottom: '1px solid ' + colors.borderLight,
+    marginBottom: 8,
+  },
+  group: {
+    marginBottom: 8,
+  },
+  groupLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    padding: '6px 16px 4px',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  link: {
+    display: 'block',
+    padding: '8px 16px',
+    fontSize: 13,
+    color: colors.text,
+    textDecoration: 'none',
+    borderLeft: '3px solid transparent',
+  },
+  linkActive: {
+    background: '#eff6ff',
+    color: colors.primary,
+    borderLeftColor: colors.primary,
+    fontWeight: 500,
+  },
+  content: {
+    flex: 1,
+    minWidth: 0,
+  },
+};
