@@ -24,6 +24,7 @@ import WorkRecordsPage from './pages/WorkRecordsPage';
 import IncidentsPage from './pages/IncidentsPage';
 import CoursesMapPage from './pages/admin/CoursesMapPage';
 import PagePermissionsPage from './pages/admin/PagePermissionsPage';
+import PaymentStatementsPage from './pages/PaymentStatementsPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { session, profile, loading } = useAuth();
@@ -96,6 +97,7 @@ export default function App() {
             />
             <Route path="work-records" element={<WorkRecordsPage />} />
             <Route path="incidents" element={<IncidentsPage />} />
+            <Route path="payment-statements" element={<PaymentStatementsPage />} />
             <Route
               path="settings"
               element={

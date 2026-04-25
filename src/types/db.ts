@@ -162,6 +162,43 @@ export interface WorkRecord {
   created_at: string;
 }
 
+export interface ClosedPaymentStatementDailyRow {
+  date: string; // YYYY-MM-DD
+  day_of_week: number; // 0=日 .. 6=土
+  kodate: number;
+  vehicle: number;
+  count: number;
+  subtotal: number;
+}
+
+export interface ClosedPaymentStatementDriverSnapshot {
+  full_name: string;
+  office_id: string | null;
+  office_name?: string | null;
+  business_type: BusinessType | null;
+  company_name: string | null;
+}
+
+export interface ClosedPaymentStatement {
+  id: string;
+  driver_id: string;
+  year: number;
+  month: number;
+  revenue: number;
+  kodate_total: number;
+  vehicle_total: number;
+  deduction_rate: number;
+  deduction_amount: number;
+  payment_amount: number;
+  daily_rows: ClosedPaymentStatementDailyRow[];
+  category_matrix: unknown;
+  driver_snapshot: ClosedPaymentStatementDriverSnapshot | null;
+  finalized_at: string;
+  finalized_by: string | null;
+  modified_at: string | null;
+  modified_by: string | null;
+}
+
 export type PayeeTaxStatus = 'taxable' | 'exempt';
 
 export interface ExpenseRecord {

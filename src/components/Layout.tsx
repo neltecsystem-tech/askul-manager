@@ -44,6 +44,7 @@ const DEFAULT_ITEMS: { key: string; label: string; fallbackAdmin: boolean; fallb
   { key: 'my-deliveries', label: '自分の配送実績', fallbackAdmin: true, fallbackDriver: true },
   { key: 'expenses', label: '立替金精算', fallbackAdmin: true, fallbackDriver: false },
   { key: 'closing', label: '月次締め/請求', fallbackAdmin: true, fallbackDriver: false },
+  { key: 'payment-statements', label: '支払明細書', fallbackAdmin: true, fallbackDriver: true },
 ];
 
 const MOBILE_BREAKPOINT = 768;

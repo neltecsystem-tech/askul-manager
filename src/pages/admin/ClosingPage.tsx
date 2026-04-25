@@ -105,6 +105,7 @@ export default function ClosingPage() {
   const [selectedDriver, setSelectedDriver] = useState<string | null>(null);
   const [docMode, setDocMode] = useState<'invoice' | 'payment'>('invoice');
   const [bulkMode, setBulkMode] = useState<'invoice' | 'payment' | null>(null);
+  const [finalizing, setFinalizing] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -331,6 +332,141 @@ export default function ClosingPage() {
     setDateTo(p.to);
   };
 
+  const finalizePaymentStatements = async () => {
+    if (aggregates.length === 0 || !dateFrom || !dateTo) return;
+
+    const eligible = aggregates.filter((a) => a.driver_id);
+    if (eligible.length === 0) {
+      alert('プロファイルに紐付いたドライバーがいません。');
+      return;
+    }
+
+    const year = parseInt(dateTo.slice(0, 4));
+    const month = parseInt(dateTo.slice(5, 7));
+
+    const { data: existing, error: existingErr } = await supabase
+      .from('closed_payment_statements')
+      .select('driver_id')
+      .eq('year', year)
+      .eq('month', month);
+    if (existingErr) {
+      alert('既存データの確認に失敗: ' + existingErr.message);
+      return;
+    }
+    const existingCount = existing?.length ?? 0;
+
+    const msg =
+      existingCount > 0
+        ? `${year}年${month}月度の確定済データ ${existingCount}件 が既にあります。\n上書き確定しますか？(対象 ${eligible.length}名)`
+        : `${year}年${month}月度の支払明細書を確定します。\n対象 ${eligible.length}名\nよろしいですか？`;
+    if (!confirm(msg)) return;
+
+    setFinalizing(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const isUpdate = existingCount > 0;
+
+      const buildDailyRows = (agg: DriverAggregate) => {
+        const dates: Date[] = [];
+        const cur = new Date(dateFrom);
+        const end = new Date(dateTo);
+        while (cur <= end) {
+          dates.push(new Date(cur));
+          cur.setDate(cur.getDate() + 1);
+        }
+        const byDate = new Map<string, DeliveryRow[]>();
+        for (const r of agg.rows) {
+          const arr = byDate.get(r.work_date) ?? [];
+          arr.push(r);
+          byDate.set(r.work_date, arr);
+        }
+        const formByDate = new Map<string, FormResponse[]>();
+        for (const f of agg.formRows) {
+          const arr = formByDate.get(f.work_date) ?? [];
+          arr.push(f);
+          formByDate.set(f.work_date, arr);
+        }
+        return dates.map((d) => {
+          const ds = fmtDate(d);
+          const rs = byDate.get(ds) ?? [];
+          const formAdds = formByDate.get(ds) ?? [];
+          const isMasterVehicleDay = agg.vehicle_day_dates.has(ds);
+          const masterVehicle = isMasterVehicleDay
+            ? agg.vehicle_day_amounts.get(ds) ?? 0
+            : 0;
+          const kodateBase = isMasterVehicleDay
+            ? 0
+            : rs.reduce((s, r) => s + (r.amount || 0), 0);
+          const formKodate = formAdds
+            .filter((f) => formAdjustment(f.type) === 'kodate')
+            .reduce((s, f) => s + f.amount, 0);
+          const formVehicle = formAdds
+            .filter((f) => formAdjustment(f.type) === 'vehicle')
+            .reduce((s, f) => s + f.amount, 0);
+          const kodate = kodateBase + formKodate;
+          const vehicle = masterVehicle + formVehicle;
+          const qty = rs.reduce((s, r) => s + (r.quantity || 0), 0);
+          return {
+            date: ds,
+            day_of_week: d.getDay(),
+            kodate,
+            vehicle,
+            count: qty,
+            subtotal: kodate + vehicle,
+          };
+        });
+      };
+
+      const rows = eligible.map((agg) => {
+        const daily = buildDailyRows(agg);
+        const kodate_total = daily.reduce((s, r) => s + r.kodate, 0);
+        const vehicle_total = daily.reduce((s, r) => s + r.vehicle, 0);
+        const revenue = kodate_total + vehicle_total;
+        const profile = profiles.find((p) => p.id === agg.driver_id);
+        const office = offices.find((o) => o.id === profile?.office_id);
+        return {
+          driver_id: agg.driver_id!,
+          year,
+          month,
+          revenue,
+          kodate_total,
+          vehicle_total,
+          deduction_rate: agg.deduction_rate,
+          deduction_amount: agg.deduction_amount,
+          payment_amount: revenue - agg.deduction_amount,
+          daily_rows: daily,
+          category_matrix: null,
+          driver_snapshot: profile
+            ? {
+                full_name: profile.full_name,
+                office_id: profile.office_id,
+                office_name: office?.name ?? null,
+                business_type: profile.business_type,
+                company_name: profile.company_name,
+              }
+            : null,
+          finalized_by: user?.id ?? null,
+          modified_at: isUpdate ? new Date().toISOString() : null,
+          modified_by: isUpdate ? user?.id ?? null : null,
+        };
+      });
+
+      const { error } = await supabase
+        .from('closed_payment_statements')
+        .upsert(rows, { onConflict: 'driver_id,year,month' });
+      if (error) throw error;
+
+      alert(`${rows.length}名分の支払明細書を確定しました。`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      alert('確定エラー: ' + msg);
+    } finally {
+      setFinalizing(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -350,6 +486,14 @@ export default function ClosingPage() {
               disabled={loading || aggregates.length === 0}
             >
               全員の支払明細
+            </button>
+            <button
+              style={btn}
+              onClick={finalizePaymentStatements}
+              disabled={loading || finalizing || aggregates.length === 0}
+              title="現在の集計を支払明細書として確定保存し、各ドライバー/法人オーナーが閲覧できるようにします"
+            >
+              {finalizing ? '確定中...' : '支払明細書を確定'}
             </button>
             <button style={btnPrimary} onClick={load} disabled={loading}>
               {loading ? '読み込み中...' : '再集計'}
