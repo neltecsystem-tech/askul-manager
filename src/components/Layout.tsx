@@ -200,6 +200,9 @@ export default function Layout() {
           <div style={{ fontSize: 13, color: colors.textMuted, flex: 1 }}>
             {profile?.full_name} ({isAdmin ? '管理者' : 'ドライバー'})
           </div>
+          <Link to="/change-password" style={{ ...styles.logoutBtn, textDecoration: 'none', color: '#0f172a', marginRight: 8 }}>
+            🔑 パスワード変更
+          </Link>
           <button onClick={signOut} style={styles.logoutBtn}>
             ログアウト
           </button>
