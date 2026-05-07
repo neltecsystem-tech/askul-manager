@@ -25,6 +25,7 @@ import IncidentsPage from './pages/IncidentsPage';
 import CoursesMapPage from './pages/admin/CoursesMapPage';
 import PagePermissionsPage from './pages/admin/PagePermissionsPage';
 import PaymentStatementsPage from './pages/PaymentStatementsPage';
+import SpecialAllowancePage from './pages/admin/SpecialAllowancePage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { session, profile, loading } = useAuth();
@@ -92,6 +93,14 @@ export default function App() {
               element={
                 <RequireAdmin>
                   <CoursesMapPage />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="special-allowance"
+              element={
+                <RequireAdmin>
+                  <SpecialAllowancePage />
                 </RequireAdmin>
               }
             />
