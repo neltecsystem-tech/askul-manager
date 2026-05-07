@@ -15,6 +15,7 @@ function daysInMonth(y: number, m: number): number {
 export default function WorkRecordsPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
+  const hideAmount = profile?.business_type === 'corporation';
   const now = new Date();
 
   const [year, setYear] = useState(now.getFullYear());
@@ -236,8 +237,13 @@ export default function WorkRecordsPage() {
           </label>
         )}
         <div style={{ fontSize: 12, color: colors.textMuted, marginLeft: 'auto' }}>
-          合計: <strong style={{ color: colors.text, fontSize: 14 }}>{totalAmount.toLocaleString()} 円</strong>
-          {' / '}登録 {records.length} 件
+          {!hideAmount && (
+            <>
+              合計: <strong style={{ color: colors.text, fontSize: 14 }}>{totalAmount.toLocaleString()} 円</strong>
+              {' / '}
+            </>
+          )}
+          登録 {records.length} 件
         </div>
       </div>
 
@@ -256,12 +262,14 @@ export default function WorkRecordsPage() {
                 {items.map((it) => (
                   <th key={it.id} style={{ ...cellTh, minWidth: 90 }}>
                     <div>{it.name}</div>
-                    <div style={{ fontWeight: 400, fontSize: 11 }}>
-                      {it.amount.toLocaleString()} 円
-                    </div>
+                    {!hideAmount && (
+                      <div style={{ fontWeight: 400, fontSize: 11 }}>
+                        {it.amount.toLocaleString()} 円
+                      </div>
+                    )}
                   </th>
                 ))}
-                <th style={{ ...cellTh, minWidth: 90 }}>日計</th>
+                {!hideAmount && <th style={{ ...cellTh, minWidth: 90 }}>日計</th>}
               </tr>
             </thead>
             <tbody>
@@ -303,17 +311,19 @@ export default function WorkRecordsPage() {
                         </td>
                       );
                     })}
-                    <td
-                      style={{
-                        ...cellTd,
-                        textAlign: 'right',
-                        background: d.isWeekend ? '#fef2f2' : '#fff',
-                        fontWeight: sum > 0 ? 600 : 400,
-                        color: sum > 0 ? colors.text : colors.textMuted,
-                      }}
-                    >
-                      {sum > 0 ? `${sum.toLocaleString()} 円` : '—'}
-                    </td>
+                    {!hideAmount && (
+                      <td
+                        style={{
+                          ...cellTd,
+                          textAlign: 'right',
+                          background: d.isWeekend ? '#fef2f2' : '#fff',
+                          fontWeight: sum > 0 ? 600 : 400,
+                          color: sum > 0 ? colors.text : colors.textMuted,
+                        }}
+                      >
+                        {sum > 0 ? `${sum.toLocaleString()} 円` : '—'}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -342,13 +352,19 @@ export default function WorkRecordsPage() {
                         color: count > 0 ? colors.text : colors.textMuted,
                       }}
                     >
-                      {count > 0 ? `${count}回 / ${sum.toLocaleString()}円` : '—'}
+                      {count > 0
+                        ? hideAmount
+                          ? `${count}回`
+                          : `${count}回 / ${sum.toLocaleString()}円`
+                        : '—'}
                     </td>
                   );
                 })}
-                <td style={{ ...cellTd, textAlign: 'right', fontWeight: 700 }}>
-                  {totalAmount.toLocaleString()} 円
-                </td>
+                {!hideAmount && (
+                  <td style={{ ...cellTd, textAlign: 'right', fontWeight: 700 }}>
+                    {totalAmount.toLocaleString()} 円
+                  </td>
+                )}
               </tr>
             </tbody>
           </table>
