@@ -73,12 +73,22 @@ Deno.serve(async (req: Request) => {
     const [deliveryValues, formValues, profilesRes, vehicleDaysRes, ratesRes] = await Promise.all([
       fetchSheet(DELIVERY_RANGE),
       fetchSheet(FORM_RANGE),
-      admin.from('profiles').select('id, full_name, deduction_rate'),
+      admin.from('profiles').select('id, full_name, deduction_rate, business_type, monthly_salary, active'),
       admin.from('vehicle_days').select('month, day, amount').eq('active', true),
       admin.from('driver_deduction_rates').select('driver_id, effective_from, deduction_rate').order('effective_from'),
     ]);
 
-    const profiles = (profilesRes.data ?? []) as { id: string; full_name: string; deduction_rate: number | null }[];
+    const profiles = (profilesRes.data ?? []) as { id: string; full_name: string; deduction_rate: number | null; business_type: string | null; monthly_salary: number | null; active: boolean }[];
+
+    // 社員の月給合計 (アクティブな biz_type='employee' のみ)
+    let employee_salary_total = 0;
+    let employee_count = 0;
+    for (const p of profiles) {
+      if (p.active && p.business_type === 'employee' && (p.monthly_salary ?? 0) > 0) {
+        employee_salary_total += Number(p.monthly_salary);
+        employee_count++;
+      }
+    }
     const vehicleDaysRows = (vehicleDaysRes.data ?? []) as { month: number; day: number; amount: number }[];
     const rateRows = (ratesRes.data ?? []) as { driver_id: string; effective_from: string; deduction_rate: number }[];
 
@@ -206,8 +216,9 @@ Deno.serve(async (req: Request) => {
       revenue += a.revenue;
       deductionTotal += a.deduction_amount;
     }
-    const payment = revenue - deductionTotal;
-    const profit = deductionTotal;
+    const driver_payment = revenue - deductionTotal;
+    const payment = driver_payment + employee_salary_total;
+    const profit = deductionTotal - employee_salary_total;
     const profit_rate = revenue > 0 ? (profit / revenue) * 100 : 0;
     const invoice = Math.round(revenue * 1.1);
 
@@ -215,6 +226,9 @@ Deno.serve(async (req: Request) => {
       period: { from, to },
       revenue,
       payment,
+      driver_payment,
+      employee_salary_total,
+      employee_count,
       profit,
       profit_rate,
       invoice,
