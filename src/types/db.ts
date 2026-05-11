@@ -18,6 +18,7 @@ export interface Profile {
   active: boolean;
   business_type: BusinessType | null;
   company_name: string | null;
+  monthly_salary: number | null;
   must_change_password: boolean;
   created_at: string;
 }

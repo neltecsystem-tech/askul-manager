@@ -14,6 +14,7 @@ interface NewDriver {
   office_id: string;
   business_type: BusinessType | '';
   company_name: string;
+  monthly_salary: number;
 }
 const emptyNew: NewDriver = {
   email: '',
@@ -23,6 +24,7 @@ const emptyNew: NewDriver = {
   office_id: '',
   business_type: '',
   company_name: '',
+  monthly_salary: 0,
 };
 
 // 初回セットアップ用: マスタシートのA2:B34を重複排除したドライバーリスト
@@ -61,6 +63,7 @@ interface EditDriver {
   new_password: string;
   business_type: BusinessType | '';
   company_name: string;
+  monthly_salary: number;
 }
 
 function todayStr(): string {
@@ -127,6 +130,7 @@ export default function DriversPage() {
           creating.business_type === 'corporation' || creating.business_type === 'corporation_owner'
             ? creating.company_name.trim() || null
             : null,
+        monthly_salary: creating.business_type === 'employee' ? creating.monthly_salary : 0,
       },
     });
     setBusy(false);
@@ -161,6 +165,7 @@ export default function DriversPage() {
           editing.business_type === 'corporation' || editing.business_type === 'corporation_owner'
             ? editing.company_name.trim() || null
             : null,
+        monthly_salary: editing.business_type === 'employee' ? editing.monthly_salary : 0,
       })
       .eq('id', editing.id);
     if (profileErr) {
@@ -307,6 +312,7 @@ export default function DriversPage() {
       new_password: '',
       business_type: p.business_type ?? '',
       company_name: p.company_name ?? '',
+      monthly_salary: Number(p.monthly_salary ?? 0),
     });
 
   const drivers = rows.filter((r) => r.role === 'driver');
@@ -320,6 +326,9 @@ export default function DriversPage() {
         {p.business_type ? businessTypeLabels[p.business_type] : '—'}
         {(p.business_type === 'corporation' || p.business_type === 'corporation_owner') && p.company_name ? (
           <div style={{ fontSize: 11, color: '#6b7280' }}>{p.company_name}</div>
+        ) : null}
+        {p.business_type === 'employee' && (p.monthly_salary ?? 0) > 0 ? (
+          <div style={{ fontSize: 11, color: '#6b7280' }}>月給 ¥{Number(p.monthly_salary).toLocaleString()}</div>
         ) : null}
       </td>
       <td style={td}>{officeName(p.office_id)}</td>
@@ -513,6 +522,20 @@ export default function DriversPage() {
                   />
                 </label>
               )}
+              {creating.business_type === 'employee' && (
+                <label style={labelStyle}>
+                  月給 (円)
+                  <input
+                    type="number"
+                    min={0}
+                    step={1000}
+                    style={input}
+                    value={creating.monthly_salary}
+                    onChange={(e) => setCreating({ ...creating, monthly_salary: Number(e.target.value) || 0 })}
+                    placeholder="例: 250000"
+                  />
+                </label>
+              )}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
               <button style={btn} onClick={() => setCreating(null)} disabled={busy}>
@@ -641,6 +664,20 @@ export default function DriversPage() {
                     value={editing.company_name}
                     onChange={(e) => setEditing({ ...editing, company_name: e.target.value })}
                     placeholder="例: 株式会社○○"
+                  />
+                </label>
+              )}
+              {editing.business_type === 'employee' && (
+                <label style={labelStyle}>
+                  月給 (円)
+                  <input
+                    type="number"
+                    min={0}
+                    step={1000}
+                    style={input}
+                    value={editing.monthly_salary}
+                    onChange={(e) => setEditing({ ...editing, monthly_salary: Number(e.target.value) || 0 })}
+                    placeholder="例: 250000"
                   />
                 </label>
               )}
