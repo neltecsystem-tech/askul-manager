@@ -15,6 +15,7 @@ interface NewDriver {
   business_type: BusinessType | '';
   company_name: string;
   monthly_salary: number;
+  invoice_number: string;
 }
 const emptyNew: NewDriver = {
   email: '',
@@ -25,6 +26,7 @@ const emptyNew: NewDriver = {
   business_type: '',
   company_name: '',
   monthly_salary: 0,
+  invoice_number: '',
 };
 
 // 初回セットアップ用: マスタシートのA2:B34を重複排除したドライバーリスト
@@ -64,6 +66,7 @@ interface EditDriver {
   business_type: BusinessType | '';
   company_name: string;
   monthly_salary: number;
+  invoice_number: string;
 }
 
 function todayStr(): string {
@@ -131,6 +134,7 @@ export default function DriversPage() {
             ? creating.company_name.trim() || null
             : null,
         monthly_salary: creating.business_type === 'employee' ? creating.monthly_salary : 0,
+        invoice_number: creating.invoice_number.trim() || null,
       },
     });
     setBusy(false);
@@ -166,6 +170,7 @@ export default function DriversPage() {
             ? editing.company_name.trim() || null
             : null,
         monthly_salary: editing.business_type === 'employee' ? editing.monthly_salary : 0,
+        invoice_number: editing.invoice_number.trim() || null,
       })
       .eq('id', editing.id);
     if (profileErr) {
@@ -313,6 +318,7 @@ export default function DriversPage() {
       business_type: p.business_type ?? '',
       company_name: p.company_name ?? '',
       monthly_salary: Number(p.monthly_salary ?? 0),
+      invoice_number: (p as { invoice_number?: string | null }).invoice_number ?? '',
     });
 
   const drivers = rows.filter((r) => r.role === 'driver');
@@ -536,6 +542,17 @@ export default function DriversPage() {
                   />
                 </label>
               )}
+              <label style={labelStyle}>
+                インボイス登録番号
+                <input
+                  type="text"
+                  style={input}
+                  value={creating.invoice_number}
+                  onChange={(e) => setCreating({ ...creating, invoice_number: e.target.value })}
+                  placeholder="例: T1234567890123"
+                />
+                <span style={{ fontSize: 11, color: '#6b7280' }}>登録あり=外税、なし=内税で請求書生成</span>
+              </label>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
               <button style={btn} onClick={() => setCreating(null)} disabled={busy}>
@@ -681,6 +698,17 @@ export default function DriversPage() {
                   />
                 </label>
               )}
+              <label style={labelStyle}>
+                インボイス登録番号
+                <input
+                  type="text"
+                  style={input}
+                  value={editing.invoice_number}
+                  onChange={(e) => setEditing({ ...editing, invoice_number: e.target.value })}
+                  placeholder="例: T1234567890123"
+                />
+                <span style={{ fontSize: 11, color: '#6b7280' }}>登録あり=外税、なし=内税で請求書生成</span>
+              </label>
               <label
                 style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
               >
