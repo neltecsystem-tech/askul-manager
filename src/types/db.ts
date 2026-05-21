@@ -19,6 +19,8 @@ export interface Profile {
   business_type: BusinessType | null;
   company_name: string | null;
   monthly_salary: number | null;
+  invoice_number: string | null;
+  phone: string | null;
   must_change_password: boolean;
   created_at: string;
 }
