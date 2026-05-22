@@ -37,12 +37,16 @@ export default function SpecialAllowancePage() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
+      // profiles テーブルに sort_order カラムは存在しない (Profile interface 参照)
+      // → full_name 昇順のみ
+      const { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, sort_order')
+        .select('id, full_name')
         .eq('active', true)
-        .order('sort_order')
         .order('full_name');
+      if (error) {
+        console.warn('profiles fetch failed:', error);
+      }
       const arr = ((data ?? []) as { id: string; full_name: string }[])
         .filter((d) => !!d.full_name);
       setDrivers(arr);
