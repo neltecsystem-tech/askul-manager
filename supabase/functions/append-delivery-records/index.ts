@@ -53,29 +53,50 @@ Deno.serve(async (req: Request) => {
     // OAuth アクセストークン取得
     const accessToken = await getAccessToken(sa.client_email, sa.private_key, SHEETS_SCOPE);
 
-    // Sheets API に append
-    // insertDataOption=OVERWRITE: 既存グリッドの空白セルに上書き (新規行追加しない)
-    // WB 全体のセル数が 10M 上限に近い場合、INSERT_ROWS だと拒否されるため OVERWRITE 必須
-    const range = `${SHEET_NAME}!A:P`;
-    const url =
-      `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/` +
-      encodeURIComponent(range) +
-      ':append?valueInputOption=USER_ENTERED&insertDataOption=OVERWRITE';
+    // append は使わない (Forms連携シート以外でも 末尾検出が不安定で同じ行に上書きされ続ける現象あり)
+    // 代わりに: A列全件読み取り → 末尾の非空行を明示計算 → values.update で その行から書き込み
+    // これでグリッド内空白セルへの上書きとなり セル数増加なし (10M 上限抵触回避)
 
-    const appendRes = await fetch(url, {
-      method: 'POST',
+    // 1. A 列全体を取得して 末尾の非空行を計算
+    const getUrl =
+      `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/` +
+      encodeURIComponent(`${SHEET_NAME}!A:A`);
+    const getRes = await fetch(getUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!getRes.ok) {
+      return json({ error: `末尾検出失敗 ${getRes.status}: ${await getRes.text()}` }, 502);
+    }
+    const getData = (await getRes.json()) as { values?: string[][] };
+    const aColumn = getData.values ?? [];
+    let lastNonEmpty = 0;
+    aColumn.forEach((r, i) => {
+      if (r && r[0]) lastNonEmpty = i + 1;
+    });
+    const startRow = lastNonEmpty + 1;
+    const endRow = startRow + rows.length - 1;
+
+    // 2. その行から rows.length 行ぶん update で書き込み (append ではなく)
+    const updateRange = `${SHEET_NAME}!A${startRow}:P${endRow}`;
+    const updateUrl =
+      `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/` +
+      encodeURIComponent(updateRange) +
+      '?valueInputOption=USER_ENTERED';
+
+    const updateRes = await fetch(updateUrl, {
+      method: 'PUT',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ values: rows }),
     });
-    if (!appendRes.ok) {
-      const text = await appendRes.text();
-      return json({ error: `Sheets API append エラー ${appendRes.status}: ${text}` }, 502);
+    if (!updateRes.ok) {
+      const text = await updateRes.text();
+      return json({ error: `Sheets API update エラー ${updateRes.status}: ${text}` }, 502);
     }
-    const result = await appendRes.json();
-    return json({ ok: true, updatedRange: result.updates?.updatedRange, updatedRows: result.updates?.updatedRows ?? rows.length });
+    const result = await updateRes.json();
+    return json({ ok: true, updatedRange: result.updatedRange ?? updateRange, updatedRows: result.updatedRows ?? rows.length });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
