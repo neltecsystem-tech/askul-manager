@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import PageHeader from '../../components/PageHeader';
 import { btn, btnPrimary, card, colors, input, table, td, th } from '../../lib/ui';
-import type { DriverDeductionRate, Office, Profile } from '../../types/db';
+import type { DeliverySwap, DriverDeductionRate, Office, Profile } from '../../types/db';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
@@ -74,16 +74,17 @@ interface DriverAggregate {
   days: Set<string>;
   count: number;
   quantity: number;
-  // ドライバー支払い計算ベース (車建日マスタ置換 + フォーム加算込み)
+  // ドライバー支払い計算ベース (車建日マスタ置換 + フォーム加算込み、 swap 適用後)
   revenue: number;
-  // アスクル請求ベース (シートP列の単純合計、 車建日マスタ置換なし、 フォーム加算なし)
+  // アスクル請求ベース (シートP列の単純合計、 swap 影響なし)
   invoice_revenue: number;
   form_vehicle: number; // フォーム車建合計
   form_kodate: number; // フォーム個建+ 合計
   master_vehicle: number; // マスタ車建日による合計 (控除対象外)
   vehicle_day_dates: Set<string>; // 車建日として処理した work_date
   vehicle_day_amounts: Map<string, number>; // work_date -> 車建単価
-  rows: DeliveryRow[];
+  rows: DeliveryRow[];           // 支払明細書 dayRows 構築用 (swap 適用後)
+  invoice_rows: DeliveryRow[];   // 請求書 dayRows 構築用 (シート原データのまま)
   formRows: FormResponse[];
 }
 
@@ -115,6 +116,7 @@ export default function ClosingPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [offices, setOffices] = useState<Office[]>([]);
   const [rateHistory, setRateHistory] = useState<DriverDeductionRate[]>([]);
+  const [swaps, setSwaps] = useState<DeliverySwap[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDriver, setSelectedDriver] = useState<string | null>(null);
@@ -181,10 +183,12 @@ export default function ClosingPage() {
       { data: profileData, error: profileErr },
       { data: officeData, error: officeErr },
       { data: rateData, error: rateErr },
+      { data: swapData, error: swapErr },
     ] = await Promise.all([
       supabase.from('profiles').select('*'),
       supabase.from('offices').select('*'),
       supabase.from('driver_deduction_rates').select('*').order('effective_from'),
+      supabase.from('delivery_swaps').select('*').is('reverted_at', null),
     ]);
     if (profileErr) setError(profileErr.message);
     else setProfiles((profileData ?? []) as Profile[]);
@@ -192,6 +196,8 @@ export default function ClosingPage() {
     else setOffices((officeData ?? []) as Office[]);
     if (rateErr) setError(rateErr.message);
     else setRateHistory((rateData ?? []) as DriverDeductionRate[]);
+    if (swapErr) console.warn('delivery_swaps fetch failed:', swapErr);
+    else setSwaps((swapData ?? []) as DeliverySwap[]);
     setLoading(false);
   };
 
@@ -269,6 +275,7 @@ export default function ClosingPage() {
           vehicle_day_dates: new Set<string>(),
           vehicle_day_amounts: new Map<string, number>(),
           rows: [],
+          invoice_rows: [],
           formRows: [],
         };
         map.set(key, agg);
@@ -276,25 +283,43 @@ export default function ClosingPage() {
       return agg;
     };
 
-    for (const r of filtered) {
-      const agg = ensure(r.driver_code, r.driver_name);
-      agg.days.add(r.work_date);
-      agg.count += 1;
-      agg.quantity += r.quantity || 0;
-      agg.rows.push(r);
-      // アスクル請求 (= シートP列単純合計) は車建日もそのまま加算
-      agg.invoice_revenue += r.amount || 0;
+    // swap 適用: 該当する行は driver_name/code を 先ドライバーに書き換え (シートは触らない)
+    const applySwap = (r: DeliveryRow): DeliveryRow => {
+      const swap = swaps.find((s) =>
+        normalizeDriverName(s.from_driver_name) === normalizeDriverName(r.driver_name) &&
+        r.work_date >= s.period_from &&
+        r.work_date <= s.period_to,
+      );
+      if (swap) {
+        return { ...r, driver_name: swap.to_driver_name, driver_code: swap.to_driver_code };
+      }
+      return r;
+    };
 
-      const vehAmount = vehicleDayMap.get(mdKey(r.work_date));
+    for (const r of filtered) {
+      // 請求書側 (アスクル原データ、 swap 影響なし): シート上の名前で集計
+      const aggInvoice = ensure(r.driver_code, r.driver_name);
+      aggInvoice.invoice_revenue += r.amount || 0;
+      aggInvoice.invoice_rows.push(r);
+
+      // 支払い側 (swap 適用後): 先ドライバーに振り替え
+      const rPay = applySwap(r);
+      const aggPay = ensure(rPay.driver_code, rPay.driver_name);
+      aggPay.days.add(rPay.work_date);
+      aggPay.count += 1;
+      aggPay.quantity += rPay.quantity || 0;
+      aggPay.rows.push(rPay);
+
+      const vehAmount = vehicleDayMap.get(mdKey(rPay.work_date));
       if (vehAmount !== undefined) {
-        // 車建日: 個建ではなく車建扱い。日単位で後ほど1回だけ加算
-        agg.vehicle_day_dates.add(r.work_date);
-        agg.vehicle_day_amounts.set(r.work_date, vehAmount);
+        // 車建日: 個建ではなく車建扱い。 日単位で後ほど1回だけ加算
+        aggPay.vehicle_day_dates.add(rPay.work_date);
+        aggPay.vehicle_day_amounts.set(rPay.work_date, vehAmount);
       } else {
         // 通常の個建
-        agg.revenue += r.amount || 0;
-        const rate = getRateOn(agg.driver_id, r.work_date, agg.deduction_rate);
-        agg.deduction_amount += Math.round(((r.amount || 0) * rate) / 100);
+        aggPay.revenue += rPay.amount || 0;
+        const rate = getRateOn(aggPay.driver_id, rPay.work_date, aggPay.deduction_rate);
+        aggPay.deduction_amount += Math.round(((rPay.amount || 0) * rate) / 100);
       }
     }
 
@@ -329,7 +354,7 @@ export default function ClosingPage() {
     }
     return Array.from(map.values()).sort((a, b) => a.driver_code.localeCompare(b.driver_code));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [records, formResponses, profiles, rateHistoryByDriver, dateFrom, dateTo]);
+  }, [records, formResponses, profiles, rateHistoryByDriver, dateFrom, dateTo, swaps]);
 
   const totals = useMemo(() => {
     let revenue = 0, payment = 0, invoice = 0;
@@ -719,9 +744,10 @@ function InvoiceModal({
     }
   }
 
+  // 請求書はシート原データのまま (swap 影響なし、 invoice_rows を参照)
   const byDate = useMemo(() => {
     const map = new Map<string, DeliveryRow[]>();
-    for (const r of aggregate.rows) {
+    for (const r of aggregate.invoice_rows) {
       const arr = map.get(r.work_date) ?? [];
       arr.push(r);
       map.set(r.work_date, arr);
@@ -1360,8 +1386,12 @@ function BulkDocumentsView({
         {aggregates.map((agg) => {
           const profile = profiles.find((p) => normalizeDriverName(p.full_name) === normalizeDriverName(agg.driver_name)) ?? null;
           const officeName = offices.find((o) => o.id === profile?.office_id)?.name ?? '杉並営業所';
+          // mode によって参照する rows が違う:
+          //   invoice (請求書): invoice_rows (シート原データ、 swap 影響なし)
+          //   payment (支払明細): rows (swap 適用後)
+          const sourceRows = mode === 'invoice' ? agg.invoice_rows : agg.rows;
           const byDate = new Map<string, DeliveryRow[]>();
-          for (const r of agg.rows) {
+          for (const r of sourceRows) {
             const arr = byDate.get(r.work_date) ?? [];
             arr.push(r);
             byDate.set(r.work_date, arr);

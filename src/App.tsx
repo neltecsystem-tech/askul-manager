@@ -26,6 +26,7 @@ import CoursesMapPage from './pages/admin/CoursesMapPage';
 import PagePermissionsPage from './pages/admin/PagePermissionsPage';
 import PaymentStatementsPage from './pages/PaymentStatementsPage';
 import SpecialAllowancePage from './pages/admin/SpecialAllowancePage';
+import SwapDeliveryPage from './pages/admin/SwapDeliveryPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { session, profile, loading } = useAuth();
@@ -101,6 +102,14 @@ export default function App() {
               element={
                 <RequireAdmin>
                   <SpecialAllowancePage />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="swap-delivery"
+              element={
+                <RequireAdmin>
+                  <SwapDeliveryPage />
                 </RequireAdmin>
               }
             />

@@ -231,3 +231,19 @@ export interface ExpenseRecord {
   note: string | null;
   created_at: string;
 }
+
+// 支払い計算用の配送実績付け替えルール (請求書には影響しない、 シートも書き換えない)
+export interface DeliverySwap {
+  id: string;
+  from_driver_name: string;
+  from_driver_code: string;
+  to_driver_name: string;
+  to_driver_code: string;
+  period_from: string; // YYYY-MM-DD
+  period_to: string;   // YYYY-MM-DD
+  note: string | null;
+  executed_by: string | null;
+  executed_at: string;
+  reverted_at: string | null;
+  reverted_by: string | null;
+}
