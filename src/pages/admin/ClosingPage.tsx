@@ -309,6 +309,18 @@ export default function ClosingPage() {
       return r;
     };
 
+    // 控除額計算用: 各 agg の「率ごとの控除対象 amount」を一旦溜める
+    // 行ごとに round すると合計に誤差が出るため、 率ごとに合算してから × 率 → round
+    const baseByRateByAgg = new Map<DriverAggregate, Map<number, number>>();
+    const addBase = (agg: DriverAggregate, rate: number, amount: number) => {
+      let m = baseByRateByAgg.get(agg);
+      if (!m) {
+        m = new Map<number, number>();
+        baseByRateByAgg.set(agg, m);
+      }
+      m.set(rate, (m.get(rate) ?? 0) + amount);
+    };
+
     for (const r of filtered) {
       // 請求書側 (アスクル原データ、 swap 影響なし): シート上の名前で集計
       const aggInvoice = ensure(r.driver_code, r.driver_name);
@@ -325,14 +337,14 @@ export default function ClosingPage() {
 
       const vehAmount = vehicleDayMap.get(mdKey(rPay.work_date));
       if (vehAmount !== undefined) {
-        // 車建日: 個建ではなく車建扱い。 日単位で後ほど1回だけ加算
+        // 車建日: 個建ではなく車建扱い。 日単位で後ほど1回だけ加算 (控除対象外)
         aggPay.vehicle_day_dates.add(rPay.work_date);
         aggPay.vehicle_day_amounts.set(rPay.work_date, vehAmount);
       } else {
-        // 通常の個建
+        // 通常の個建: revenue に積む + 控除対象 amount を率ごとに溜める
         aggPay.revenue += rPay.amount || 0;
         const rate = getRateOn(aggPay.driver_id, rPay.work_date, aggPay.deduction_rate);
-        aggPay.deduction_amount += Math.round(((rPay.amount || 0) * rate) / 100);
+        addBase(aggPay, rate, rPay.amount || 0);
       }
     }
 
@@ -355,15 +367,24 @@ export default function ClosingPage() {
         // 車建は控除対象外
         agg.form_vehicle += f.amount;
       } else {
-        // 個建+ は控除対象
+        // 個建+ は控除対象 (率ごとに合算してから後段で × 率 → round)
         agg.form_kodate += f.amount;
         const rate = getRateOn(agg.driver_id, f.work_date, agg.deduction_rate);
-        agg.deduction_amount += Math.round((f.amount * rate) / 100);
+        addBase(agg, rate, f.amount || 0);
       }
     }
 
+    // 控除額を 率ごとに合算してから × 率 → round (行ごとの round 累積誤差を避ける)
     for (const a of map.values()) {
       a.deduction_rate = getRateOn(a.driver_id, dateTo, a.deduction_rate);
+      const baseByRate = baseByRateByAgg.get(a);
+      if (baseByRate) {
+        let dedTotal = 0;
+        for (const [rate, amount] of baseByRate) {
+          dedTotal += Math.round((amount * rate) / 100);
+        }
+        a.deduction_amount = dedTotal;
+      }
     }
     return Array.from(map.values()).sort((a, b) => a.driver_code.localeCompare(b.driver_code));
     // eslint-disable-next-line react-hooks/exhaustive-deps
