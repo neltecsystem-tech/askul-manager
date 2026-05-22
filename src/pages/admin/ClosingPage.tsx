@@ -251,16 +251,29 @@ export default function ClosingPage() {
       return true;
     });
 
+    // records から正規化名 → driver_code の逆引きマップを作る
+    // (フォーム入力で driver_code が空でも、 シート上の同名ドライバーの code を解決して統合する)
+    const driverCodeByName = new Map<string, string>();
+    for (const r of records) {
+      if (!r.driver_code) continue;
+      const k = normalizeDriverName(r.driver_name);
+      if (k && !driverCodeByName.has(k)) driverCodeByName.set(k, r.driver_code);
+    }
+
     const map = new Map<string, DriverAggregate>();
     const ensure = (driverCode: string, driverName: string): DriverAggregate => {
-      const key = driverCode || driverName;
+      const normName = normalizeDriverName(driverName);
+      // driver_code が空 (フォーム入力) なら逆引きで補完
+      const resolvedCode = driverCode || driverCodeByName.get(normName) || '';
+      // key は driver_code を優先、 なければ正規化名 (= 空白の数違いで別人扱いしない)
+      const key = resolvedCode || normName;
       let agg = map.get(key);
       if (!agg) {
         // シートのドライバー名は全角/半角スペース混在のため正規化して照合
-        const profile = profiles.find((p) => normalizeDriverName(p.full_name) === normalizeDriverName(driverName));
+        const profile = profiles.find((p) => normalizeDriverName(p.full_name) === normName);
         agg = {
-          driver_code: driverCode,
-          driver_name: driverName,
+          driver_code: resolvedCode,
+          driver_name: normName,  // 正規化済みで保存 (表示でも空白数のブレを解消)
           driver_id: profile?.id ?? null,
           deduction_rate: Number(profile?.deduction_rate ?? 0),
           deduction_amount: 0,
