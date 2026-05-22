@@ -21,6 +21,11 @@ function normalizeDriverName(name: string | undefined | null): string {
   return (name ?? '').replace(/[\s　]+/g, ' ').trim();
 }
 
+// ドライバー識別キー (同じ code で違う name のケースに対応するため code+name 合成)
+function driverKey(d: DriverOption): string {
+  return `${d.driver_code}|${d.driver_name}`;
+}
+
 function fmtDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -87,25 +92,32 @@ export default function SwapDeliveryPage() {
   }, []);
 
   // ドライバー候補 (シートに登場する driver_code + driver_name の uniq)
+  // 同じ driver_code でも driver_name が違うケース (担当者交代等) がありうるため、
+  // (driver_code, 正規化名) ペアで重複排除する
   const drivers = useMemo<DriverOption[]>(() => {
     const map = new Map<string, DriverOption>();
     for (const r of records) {
       if (!r.driver_code || !r.driver_name) continue;
-      if (!map.has(r.driver_code)) {
-        map.set(r.driver_code, { driver_code: r.driver_code, driver_name: normalizeDriverName(r.driver_name) });
+      const normName = normalizeDriverName(r.driver_name);
+      const key = `${r.driver_code}|${normName}`;
+      if (!map.has(key)) {
+        map.set(key, { driver_code: r.driver_code, driver_name: normName });
       }
     }
-    return Array.from(map.values()).sort((a, b) => a.driver_code.localeCompare(b.driver_code));
+    return Array.from(map.values()).sort(
+      (a, b) => a.driver_code.localeCompare(b.driver_code) || a.driver_name.localeCompare(b.driver_name),
+    );
   }, [records]);
 
   // プレビュー: 期間内の元ドライバーの対象行
   const preview = useMemo(() => {
     if (!fromDriver || !periodFrom || !periodTo) return { rows: 0, totalAmount: 0 };
-    const fromOpt = drivers.find((d) => d.driver_code === fromDriver);
+    const fromOpt = drivers.find((d) => driverKey(d) === fromDriver);
     if (!fromOpt) return { rows: 0, totalAmount: 0 };
     let rows = 0;
     let totalAmount = 0;
     for (const r of records) {
+      if (r.driver_code !== fromOpt.driver_code) continue;
       if (normalizeDriverName(r.driver_name) !== fromOpt.driver_name) continue;
       if (r.work_date < periodFrom || r.work_date > periodTo) continue;
       rows += 1;
@@ -136,8 +148,8 @@ export default function SwapDeliveryPage() {
       if (!confirm('対象期間に該当行が0件です。それでも登録しますか？')) return;
     }
 
-    const fromOpt = drivers.find((d) => d.driver_code === fromDriver);
-    const toOpt = drivers.find((d) => d.driver_code === toDriver);
+    const fromOpt = drivers.find((d) => driverKey(d) === fromDriver);
+    const toOpt = drivers.find((d) => driverKey(d) === toDriver);
     if (!fromOpt || !toOpt) {
       setError('ドライバー情報の解決に失敗しました');
       return;
@@ -218,7 +230,7 @@ export default function SwapDeliveryPage() {
             <select style={input} value={fromDriver} onChange={(e) => setFromDriver(e.target.value)}>
               <option value="">選択してください</option>
               {drivers.map((d) => (
-                <option key={d.driver_code} value={d.driver_code}>
+                <option key={driverKey(d)} value={driverKey(d)}>
                   {d.driver_name} ({d.driver_code})
                 </option>
               ))}
@@ -228,7 +240,7 @@ export default function SwapDeliveryPage() {
             <select style={input} value={toDriver} onChange={(e) => setToDriver(e.target.value)}>
               <option value="">選択してください</option>
               {drivers.map((d) => (
-                <option key={d.driver_code} value={d.driver_code}>
+                <option key={driverKey(d)} value={driverKey(d)}>
                   {d.driver_name} ({d.driver_code})
                 </option>
               ))}
