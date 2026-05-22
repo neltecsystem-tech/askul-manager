@@ -47,9 +47,9 @@ function vdKey(v: VehicleDay): string {
   return `${String(v.month).padStart(2, '0')}-${String(v.day).padStart(2, '0')}`;
 }
 
-// 種別→(車建/個建)振り分け (フォームの type 用)
-function formAdjustment(type: string): 'vehicle' | 'kodate' {
-  if (type.includes('個建')) return 'kodate';
+// 特別日当 (フォーム入力) は種別に関わらず すべて車建扱い (控除対象外)
+// 個建+ も含めて全て「車建欄」に表示し、 控除を引かない
+function formAdjustment(_type: string): 'vehicle' | 'kodate' {
   return 'vehicle';
 }
 
@@ -361,17 +361,9 @@ export default function ClosingPage() {
       const agg = ensure('', f.driver_name);
       agg.formRows.push(f);
       agg.days.add(f.work_date);
-      const target = formAdjustment(f.type);
       agg.revenue += f.amount;
-      if (target === 'vehicle') {
-        // 車建は控除対象外
-        agg.form_vehicle += f.amount;
-      } else {
-        // 個建+ は控除対象 (率ごとに合算してから後段で × 率 → round)
-        agg.form_kodate += f.amount;
-        const rate = getRateOn(agg.driver_id, f.work_date, agg.deduction_rate);
-        addBase(agg, rate, f.amount || 0);
-      }
+      // 特別日当はすべて車建扱い (控除対象外)
+      agg.form_vehicle += f.amount;
     }
 
     // 控除額を 率ごとに合算してから × 率 → round (行ごとの round 累積誤差を避ける)
