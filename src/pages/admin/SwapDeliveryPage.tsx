@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import PageHeader from '../../components/PageHeader';
 import { btn, btnPrimary, card, colors, input, table, td, th } from '../../lib/ui';
-import type { DeliverySwap } from '../../types/db';
+import type { DeliverySwap, Profile } from '../../types/db';
 
 interface DeliveryRecord {
   driver_code: string;
@@ -41,6 +41,7 @@ export default function SwapDeliveryPage() {
   const init = cyclePeriod(0);
   const [records, setRecords] = useState<DeliveryRecord[]>([]);
   const [swaps, setSwaps] = useState<DeliverySwap[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,12 +79,14 @@ export default function SwapDeliveryPage() {
     } catch (e) {
       setError('通信エラー: ' + (e instanceof Error ? e.message : String(e)));
     }
-    const { data: swapData, error: swapErr } = await supabase
-      .from('delivery_swaps')
-      .select('*')
-      .order('executed_at', { ascending: false });
-    if (swapErr) setError(swapErr.message);
-    else setSwaps((swapData ?? []) as DeliverySwap[]);
+    const [swapRes, profileRes] = await Promise.all([
+      supabase.from('delivery_swaps').select('*').order('executed_at', { ascending: false }),
+      supabase.from('profiles').select('*').eq('active', true).order('full_name'),
+    ]);
+    if (swapRes.error) setError(swapRes.error.message);
+    else setSwaps((swapRes.data ?? []) as DeliverySwap[]);
+    if (profileRes.error) setError(profileRes.error.message);
+    else setProfiles((profileRes.data ?? []) as Profile[]);
     setLoading(false);
   };
 
@@ -91,10 +94,9 @@ export default function SwapDeliveryPage() {
     load();
   }, []);
 
-  // ドライバー候補 (シートに登場する driver_code + driver_name の uniq)
-  // 同じ driver_code でも driver_name が違うケース (担当者交代等) がありうるため、
-  // (driver_code, 正規化名) ペアで重複排除する
-  const drivers = useMemo<DriverOption[]>(() => {
+  // 元ドライバー候補: シートに登場する driver_code + driver_name の uniq
+  // (同じ driver_code でも driver_name が違うケースに対応するため (code, 正規化名) ペアで重複排除)
+  const fromDrivers = useMemo<DriverOption[]>(() => {
     const map = new Map<string, DriverOption>();
     for (const r of records) {
       if (!r.driver_code || !r.driver_name) continue;
@@ -109,10 +111,33 @@ export default function SwapDeliveryPage() {
     );
   }, [records]);
 
+  // 先ドライバー候補: ドライバー管理 (profiles active) ベース
+  // 理由: ID 未付与の新人ドライバーが他人の ID で稼働するケースを、 マスタのドライバー宛に振替えるため
+  // シート上の driver_code に紐付けたい場合は シートの既存レコードから逆引きするが、
+  // 該当が無ければ to_driver_code は空文字 (集計時は driver_name キーで別エントリー化)
+  const toDrivers = useMemo<DriverOption[]>(() => {
+    const codeByName = new Map<string, string>();
+    for (const r of records) {
+      if (!r.driver_code) continue;
+      const k = normalizeDriverName(r.driver_name);
+      if (k && !codeByName.has(k)) codeByName.set(k, r.driver_code);
+    }
+    return profiles
+      .map((p) => {
+        const normName = normalizeDriverName(p.full_name);
+        return {
+          driver_code: codeByName.get(normName) ?? '',
+          driver_name: normName,
+        };
+      })
+      .filter((d) => !!d.driver_name)
+      .sort((a, b) => a.driver_name.localeCompare(b.driver_name, 'ja'));
+  }, [profiles, records]);
+
   // プレビュー: 期間内の元ドライバーの対象行
   const preview = useMemo(() => {
     if (!fromDriver || !periodFrom || !periodTo) return { rows: 0, totalAmount: 0 };
-    const fromOpt = drivers.find((d) => driverKey(d) === fromDriver);
+    const fromOpt = fromDrivers.find((d) => driverKey(d) === fromDriver);
     if (!fromOpt) return { rows: 0, totalAmount: 0 };
     let rows = 0;
     let totalAmount = 0;
@@ -124,7 +149,7 @@ export default function SwapDeliveryPage() {
       totalAmount += r.amount || 0;
     }
     return { rows, totalAmount };
-  }, [records, drivers, fromDriver, periodFrom, periodTo]);
+  }, [records, fromDrivers, fromDriver, periodFrom, periodTo]);
 
   const submit = async () => {
     setError(null);
@@ -148,8 +173,8 @@ export default function SwapDeliveryPage() {
       if (!confirm('対象期間に該当行が0件です。それでも登録しますか？')) return;
     }
 
-    const fromOpt = drivers.find((d) => driverKey(d) === fromDriver);
-    const toOpt = drivers.find((d) => driverKey(d) === toDriver);
+    const fromOpt = fromDrivers.find((d) => driverKey(d) === fromDriver);
+    const toOpt = toDrivers.find((d) => driverKey(d) === toDriver);
     if (!fromOpt || !toOpt) {
       setError('ドライバー情報の解決に失敗しました');
       return;
@@ -229,19 +254,19 @@ export default function SwapDeliveryPage() {
           <Field label="元ドライバー (シート上)">
             <select style={input} value={fromDriver} onChange={(e) => setFromDriver(e.target.value)}>
               <option value="">選択してください</option>
-              {drivers.map((d) => (
+              {fromDrivers.map((d) => (
                 <option key={driverKey(d)} value={driverKey(d)}>
                   {d.driver_name} ({d.driver_code})
                 </option>
               ))}
             </select>
           </Field>
-          <Field label="先ドライバー (支払い先)">
+          <Field label="先ドライバー (支払い先・ドライバー管理から)">
             <select style={input} value={toDriver} onChange={(e) => setToDriver(e.target.value)}>
               <option value="">選択してください</option>
-              {drivers.map((d) => (
+              {toDrivers.map((d) => (
                 <option key={driverKey(d)} value={driverKey(d)}>
-                  {d.driver_name} ({d.driver_code})
+                  {d.driver_name}{d.driver_code ? ` (${d.driver_code})` : ' (ID未付与)'}
                 </option>
               ))}
             </select>
