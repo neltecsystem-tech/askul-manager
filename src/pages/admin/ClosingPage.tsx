@@ -59,6 +59,12 @@ function isVehicleProduct(productName: string | undefined | null): boolean {
   return (productName ?? '').includes('車建');
 }
 
+// ドライバー名の正規化 (シート側の全角スペース / profiles 側の半角スペース ゆらぎ吸収)
+// 例: "生源寺　祐" (全角) と "生源寺 祐" (半角) を同一視
+function normalizeDriverName(name: string | undefined | null): string {
+  return (name ?? '').replace(/[\s　]+/g, ' ').trim();
+}
+
 interface DriverAggregate {
   driver_code: string;
   driver_name: string;
@@ -244,7 +250,8 @@ export default function ClosingPage() {
       const key = driverCode || driverName;
       let agg = map.get(key);
       if (!agg) {
-        const profile = profiles.find((p) => p.full_name === driverName);
+        // シートのドライバー名は全角/半角スペース混在のため正規化して照合
+        const profile = profiles.find((p) => normalizeDriverName(p.full_name) === normalizeDriverName(driverName));
         agg = {
           driver_code: driverCode,
           driver_name: driverName,
@@ -651,7 +658,7 @@ export default function ClosingPage() {
           aggregate={selected}
           from={dateFrom}
           to={dateTo}
-          profile={profiles.find((p) => p.full_name === selected.driver_name) ?? null}
+          profile={profiles.find((p) => normalizeDriverName(p.full_name) === normalizeDriverName(selected.driver_name)) ?? null}
           offices={offices}
           onClose={() => setSelectedDriver(null)}
         />
@@ -661,7 +668,7 @@ export default function ClosingPage() {
           aggregate={selected}
           from={dateFrom}
           to={dateTo}
-          profile={profiles.find((p) => p.full_name === selected.driver_name) ?? null}
+          profile={profiles.find((p) => normalizeDriverName(p.full_name) === normalizeDriverName(selected.driver_name)) ?? null}
           offices={offices}
           onClose={() => setSelectedDriver(null)}
         />
@@ -1351,7 +1358,7 @@ function BulkDocumentsView({
       </div>
       <div style={bulkStyle.pages} ref={pagesRef}>
         {aggregates.map((agg) => {
-          const profile = profiles.find((p) => p.full_name === agg.driver_name) ?? null;
+          const profile = profiles.find((p) => normalizeDriverName(p.full_name) === normalizeDriverName(agg.driver_name)) ?? null;
           const officeName = offices.find((o) => o.id === profile?.office_id)?.name ?? '杉並営業所';
           const byDate = new Map<string, DeliveryRow[]>();
           for (const r of agg.rows) {
@@ -1537,7 +1544,7 @@ function BulkDocumentsView({
         {/* 支払い明細モードのときは、各ドライバーの件数明細ページ(page2)も追加 */}
         {mode === 'payment' &&
           aggregates.map((agg) => {
-            const profile = profiles.find((p) => p.full_name === agg.driver_name) ?? null;
+            const profile = profiles.find((p) => normalizeDriverName(p.full_name) === normalizeDriverName(agg.driver_name)) ?? null;
             const officeName = offices.find((o) => o.id === profile?.office_id)?.name ?? '杉並営業所';
             return (
               <div
