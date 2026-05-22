@@ -62,7 +62,10 @@ interface DriverAggregate {
   days: Set<string>;
   count: number;
   quantity: number;
+  // ドライバー支払い計算ベース (車建日マスタ置換 + フォーム加算込み)
   revenue: number;
+  // アスクル請求ベース (シートP列の単純合計、 車建日マスタ置換なし、 フォーム加算なし)
+  invoice_revenue: number;
   form_vehicle: number; // フォーム車建合計
   form_kodate: number; // フォーム個建+ 合計
   master_vehicle: number; // マスタ車建日による合計 (控除対象外)
@@ -246,6 +249,7 @@ export default function ClosingPage() {
           count: 0,
           quantity: 0,
           revenue: 0,
+          invoice_revenue: 0,
           form_vehicle: 0,
           form_kodate: 0,
           master_vehicle: 0,
@@ -265,6 +269,8 @@ export default function ClosingPage() {
       agg.count += 1;
       agg.quantity += r.quantity || 0;
       agg.rows.push(r);
+      // アスクル請求 (= シートP列単純合計) は車建日もそのまま加算
+      agg.invoice_revenue += r.amount || 0;
 
       const vehAmount = vehicleDayMap.get(mdKey(r.work_date));
       if (vehAmount !== undefined) {
@@ -315,9 +321,11 @@ export default function ClosingPage() {
   const totals = useMemo(() => {
     let revenue = 0, payment = 0, invoice = 0;
     for (const a of aggregates) {
-      revenue += a.revenue;
+      // 総売上(税抜) / アスクル請求(税込): シートP列単純合計ベース (車建日マスタ置換 / フォーム加算なし)
+      revenue += a.invoice_revenue;
+      invoice += Math.round(a.invoice_revenue * 1.1);
+      // ドライバー支払い: 車建日マスタ置換 + フォーム加算込みの売上から控除を引く
       payment += a.revenue - a.deduction_amount;
-      invoice += Math.round(a.revenue * 1.1);
     }
     return { revenue, payment, invoice };
   }, [aggregates]);
@@ -573,8 +581,11 @@ export default function ClosingPage() {
               <tbody>
                 {aggregates.map((a) => {
                   const deduction = a.deduction_amount;
+                  // 支払額: 車建日マスタ置換 + フォーム加算込みの売上から控除を引く
                   const payment = a.revenue - deduction;
-                  const invoice = Math.round(a.revenue * 1.1);
+                  // 売上(税抜) / 請求(税込): アスクル請求ベース (シートP列単純合計)
+                  const displayRevenue = a.invoice_revenue;
+                  const invoice = Math.round(displayRevenue * 1.1);
                   const key = a.driver_code || a.driver_name;
                   return (
                     <tr key={key}>
@@ -588,7 +599,7 @@ export default function ClosingPage() {
                       <td style={{ ...td, textAlign: 'right' }}>{a.count.toLocaleString()}</td>
                       <td style={{ ...td, textAlign: 'right' }}>{a.quantity.toLocaleString()}</td>
                       <td style={{ ...td, textAlign: 'right' }}>
-                        ¥{a.revenue.toLocaleString()}
+                        ¥{displayRevenue.toLocaleString()}
                       </td>
                       <td style={{ ...td, textAlign: 'right' }}>{a.deduction_rate}%</td>
                       <td style={{ ...td, textAlign: 'right', color: '#b45309' }}>

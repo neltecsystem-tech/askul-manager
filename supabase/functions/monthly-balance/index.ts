@@ -179,15 +179,23 @@ Deno.serve(async (req: Request) => {
       return a;
     };
 
+    // 売上は2系統で集計する
+    //   revenue_invoice: アスクルへの請求ベース = DETA貼り付けシート P列の単純合計
+    //                    (車建日マスタ置換やフォーム手入力は乗らない。 アスクルが請求してきた金額そのまま)
+    //   revenue_payment: ドライバー支払い計算ベース = 車建日マスタ置換 + フォーム加算
+    let revenue_invoice = 0;
+
     const aggMap = new Map<string, Agg>();
     for (const r of deliveries) {
       const a = ensure(aggMap, r.driver_code, r.driver_name);
       a.days.add(r.work_date);
       a.count += 1;
       a.quantity += r.quantity || 0;
+      // アスクル請求側: シート原データそのまま加算 (車建日も含む)
+      revenue_invoice += r.amount || 0;
+      // ドライバー支払側: 車建日はマスタ金額に置換するため後段で処理
       const vehAmount = vehicleDayMap.get(mdKey(r.work_date));
       if (vehAmount !== undefined) {
-        // 車建日: per-day, control off, added later
         a.vehicle_day_dates.add(r.work_date);
       } else {
         a.revenue += r.amount || 0;
@@ -211,20 +219,21 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    let revenue = 0, deductionTotal = 0;
+    let revenue_payment = 0, deductionTotal = 0;
     for (const a of aggMap.values()) {
-      revenue += a.revenue;
+      revenue_payment += a.revenue;
       deductionTotal += a.deduction_amount;
     }
-    const driver_payment = revenue - deductionTotal;
+    const driver_payment = revenue_payment - deductionTotal;
     const payment = driver_payment + employee_salary_total;
-    const profit = deductionTotal - employee_salary_total;
-    const profit_rate = revenue > 0 ? (profit / revenue) * 100 : 0;
-    const invoice = Math.round(revenue * 1.1);
+    // 利益 = アスクル請求 (税抜) - 全支払 (ドライバー + 社員)
+    const profit = revenue_invoice - payment;
+    const profit_rate = revenue_invoice > 0 ? (profit / revenue_invoice) * 100 : 0;
+    const invoice = Math.round(revenue_invoice * 1.1);
 
     return json({
       period: { from, to },
-      revenue,
+      revenue: revenue_invoice,  // 画面「総売上(税抜)」 = アスクル請求の税抜
       payment,
       driver_payment,
       employee_salary_total,
