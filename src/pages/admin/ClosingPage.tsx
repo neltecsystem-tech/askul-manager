@@ -47,10 +47,16 @@ function vdKey(v: VehicleDay): string {
   return `${String(v.month).padStart(2, '0')}-${String(v.day).padStart(2, '0')}`;
 }
 
-// 種別→(車建/個建)振り分け
+// 種別→(車建/個建)振り分け (フォームの type 用)
 function formAdjustment(type: string): 'vehicle' | 'kodate' {
   if (type.includes('個建')) return 'kodate';
   return 'vehicle';
+}
+
+// 配送実績の商品名→(車建/個建) 判別 (請求書用)
+// 商品名に「車建」を含めば車建、 そうでなければ個建
+function isVehicleProduct(productName: string | undefined | null): boolean {
+  return (productName ?? '').includes('車建');
 }
 
 interface DriverAggregate {
@@ -716,23 +722,13 @@ function InvoiceModal({
     return map;
   }, [aggregate]);
 
-  const formByDate = new Map<string, FormResponse[]>();
-  for (const f of aggregate.formRows) {
-    const arr = formByDate.get(f.work_date) ?? [];
-    arr.push(f);
-    formByDate.set(f.work_date, arr);
-  }
+  // 請求書はシート原データのみ (車建日マスタ置換やフォーム加算は使わない)
+  // 個建/車建は H列(商品名) で判別 ('車建' を含めば車建、 そうでなければ個建)
   const dayRows = dates.map((d) => {
     const ds = fmtDate(d);
     const rows = byDate.get(ds) ?? [];
-    const formAdds = formByDate.get(ds) ?? [];
-    const isMasterVehicleDay = aggregate.vehicle_day_dates.has(ds);
-    const masterVehicle = isMasterVehicleDay ? (aggregate.vehicle_day_amounts.get(ds) ?? 0) : 0;
-    const kodateBase = isMasterVehicleDay ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
-    const formKodate = formAdds.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
-    const formVehicle = formAdds.filter((f) => formAdjustment(f.type) === 'vehicle').reduce((s, f) => s + f.amount, 0);
-    const kodate = kodateBase + formKodate;
-    const vehicle = masterVehicle + formVehicle;
+    const vehicle = rows.filter((r) => isVehicleProduct(r.product_name)).reduce((s, r) => s + (r.amount || 0), 0);
+    const kodate = rows.filter((r) => !isVehicleProduct(r.product_name)).reduce((s, r) => s + (r.amount || 0), 0);
     const qty = rows.reduce((s, r) => s + (r.quantity || 0), 0);
     const subtotal = kodate + vehicle;
     const tax = Math.round(subtotal * 0.1);
@@ -747,7 +743,7 @@ function InvoiceModal({
       tax,
       total,
       subtotal,
-      hasData: rows.length > 0 || formAdds.length > 0,
+      hasData: rows.length > 0,
     };
   });
 
@@ -1369,20 +1365,32 @@ function BulkDocumentsView({
             arr.push(f);
             formByDate.set(f.work_date, arr);
           }
+          // mode によって 個建/車建 計算が違う
+          //   invoice (請求書): シート原データのみ、 商品名で個建/車建判別
+          //   payment (支払明細): 車建日マスタ置換 + フォーム加算 (支払い計算ベース)
           const dayRows = dates.map((d) => {
             const ds = fmtDate(d);
             const rows = byDate.get(ds) ?? [];
             const formAdds = formByDate.get(ds) ?? [];
-            const isMasterVehicleDay = agg.vehicle_day_dates.has(ds);
-            const masterVehicle = isMasterVehicleDay ? (agg.vehicle_day_amounts.get(ds) ?? 0) : 0;
-            const kodateBase = isMasterVehicleDay ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
-            const formKodate = formAdds.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
-            const formVehicle = formAdds.filter((f) => formAdjustment(f.type) === 'vehicle').reduce((s, f) => s + f.amount, 0);
-            const kodate = kodateBase + formKodate;
-            const vehicle = masterVehicle + formVehicle;
+            let kodate: number, vehicle: number;
+            if (mode === 'invoice') {
+              vehicle = rows.filter((r) => isVehicleProduct(r.product_name)).reduce((s, r) => s + (r.amount || 0), 0);
+              kodate = rows.filter((r) => !isVehicleProduct(r.product_name)).reduce((s, r) => s + (r.amount || 0), 0);
+            } else {
+              const isMasterVehicleDay = agg.vehicle_day_dates.has(ds);
+              const masterVehicle = isMasterVehicleDay ? (agg.vehicle_day_amounts.get(ds) ?? 0) : 0;
+              const kodateBase = isMasterVehicleDay ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
+              const formKodate = formAdds.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
+              const formVehicle = formAdds.filter((f) => formAdjustment(f.type) === 'vehicle').reduce((s, f) => s + f.amount, 0);
+              kodate = kodateBase + formKodate;
+              vehicle = masterVehicle + formVehicle;
+            }
             const qty = rows.reduce((s, r) => s + (r.quantity || 0), 0);
             const subtotal = kodate + vehicle;
             const tax = Math.round(subtotal * 0.1);
+            const hasData = mode === 'invoice'
+              ? rows.length > 0
+              : rows.length > 0 || formAdds.length > 0;
             return {
               date: d,
               dow: ['日', '月', '火', '水', '木', '金', '土'][d.getDay()],
@@ -1393,7 +1401,7 @@ function BulkDocumentsView({
               tax,
               total: subtotal + tax,
               subtotal,
-              hasData: rows.length > 0 || formAdds.length > 0,
+              hasData,
             };
           });
           const totals = dayRows.reduce(
