@@ -39,9 +39,12 @@ function mdKey(workDate: string): string {
 function vdKey(month: number, day: number): string {
   return `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
-function formAdjustment(type: string): 'vehicle' | 'kodate' {
-  return type.includes('個建') ? 'kodate' : 'vehicle';
+// ドライバー名の正規化 (全角/半角スペースのゆらぎ吸収) — ClosingPage と統一
+function normalizeDriverName(name: string | undefined | null): string {
+  return (name ?? '').replace(/[\s　]+/g, ' ').trim();
 }
+// 特別日当 (フォーム入力) は種別問わず全て車建扱い (控除対象外) — ClosingPage と統一。
+// 旧ロジックは "個建" を含む種別に控除をかけていたが、 ClosingPage が全車建に変更済みのため追従。
 
 async function fetchSheet(range: string): Promise<(string | number)[][]> {
   const url =
@@ -70,13 +73,20 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
 
-    const [deliveryValues, formValues, profilesRes, vehicleDaysRes, ratesRes] = await Promise.all([
+    // 確定済み支払明細の年月キー (ClosingPage の「支払明細書を確定」と同じく 期間終了日の年月)
+    const closedYear = parseInt(to.slice(0, 4));
+    const closedMonth = parseInt(to.slice(5, 7));
+
+    const [deliveryValues, formValues, profilesRes, vehicleDaysRes, ratesRes, swapsRes, closedRes] = await Promise.all([
       fetchSheet(DELIVERY_RANGE),
       fetchSheet(FORM_RANGE),
       admin.from('profiles').select('id, full_name, deduction_rate, business_type, monthly_salary, active'),
       admin.from('vehicle_days').select('month, day, amount').eq('active', true),
       admin.from('driver_deduction_rates').select('driver_id, effective_from, deduction_rate').order('effective_from'),
+      admin.from('delivery_swaps').select('from_driver_name, to_driver_name, to_driver_code, period_from, period_to').is('reverted_at', null),
+      admin.from('closed_payment_statements').select('payment_amount, deduction_amount').eq('year', closedYear).eq('month', closedMonth),
     ]);
+    const closedRows = (closedRes.data ?? []) as { payment_amount: number; deduction_amount: number }[];
 
     const profiles = (profilesRes.data ?? []) as { id: string; full_name: string; deduction_rate: number | null; business_type: string | null; monthly_salary: number | null; active: boolean }[];
 
@@ -91,10 +101,12 @@ Deno.serve(async (req: Request) => {
     }
     const vehicleDaysRows = (vehicleDaysRes.data ?? []) as { month: number; day: number; amount: number }[];
     const rateRows = (ratesRes.data ?? []) as { driver_id: string; effective_from: string; deduction_rate: number }[];
+    const swaps = (swapsRes.data ?? []) as { from_driver_name: string; to_driver_name: string; to_driver_code: string; period_from: string; period_to: string }[];
 
+    // 正規化名でプロファイル照合 (ClosingPage と統一)
     const profileByName = new Map<string, { id: string; deduction_rate: number }>();
     for (const p of profiles) {
-      profileByName.set(p.full_name, { id: p.id, deduction_rate: Number(p.deduction_rate ?? 0) });
+      profileByName.set(normalizeDriverName(p.full_name), { id: p.id, deduction_rate: Number(p.deduction_rate ?? 0) });
     }
     const vehicleDayMap = new Map<string, number>();
     for (const v of vehicleDaysRows) vehicleDayMap.set(vdKey(Number(v.month), Number(v.day)), Number(v.amount));
@@ -151,26 +163,31 @@ Deno.serve(async (req: Request) => {
       driver_id: string | null;
       deduction_rate: number;
       deduction_amount: number;
-      days: Set<string>;
-      count: number;
-      quantity: number;
       revenue: number;
       vehicle_day_dates: Set<string>;
     }
+
+    // records(配送実績) から 正規化名 → driver_code の逆引き (フォーム入力で code 空でも統合するため)
+    const driverCodeByName = new Map<string, string>();
+    for (const r of deliveries) {
+      if (!r.driver_code) continue;
+      const k = normalizeDriverName(r.driver_name);
+      if (k && !driverCodeByName.has(k)) driverCodeByName.set(k, r.driver_code);
+    }
+
     const ensure = (map: Map<string, Agg>, code: string, name: string): Agg => {
-      const key = code || name;
+      const normName = normalizeDriverName(name);
+      const resolvedCode = code || driverCodeByName.get(normName) || '';
+      const key = resolvedCode || normName;
       let a = map.get(key);
       if (!a) {
-        const profile = profileByName.get(name);
+        const profile = profileByName.get(normName);
         a = {
-          driver_code: code,
-          driver_name: name,
+          driver_code: resolvedCode,
+          driver_name: normName,
           driver_id: profile?.id ?? null,
           deduction_rate: profile?.deduction_rate ?? 0,
           deduction_amount: 0,
-          days: new Set(),
-          count: 0,
-          quantity: 0,
           revenue: 0,
           vehicle_day_dates: new Set(),
         };
@@ -179,52 +196,86 @@ Deno.serve(async (req: Request) => {
       return a;
     };
 
-    // 売上は2系統で集計する
-    //   revenue_invoice: アスクルへの請求ベース = DETA貼り付けシート P列の単純合計
-    //                    (車建日マスタ置換やフォーム手入力は乗らない。 アスクルが請求してきた金額そのまま)
-    //   revenue_payment: ドライバー支払い計算ベース = 車建日マスタ置換 + フォーム加算
-    let revenue_invoice = 0;
+    // swap (振り替え) 適用: 該当行は driver_name/code を先ドライバーに書き換え (ClosingPage と統一)
+    const applySwap = (r: DeliveryRow): DeliveryRow => {
+      const swap = swaps.find((s) =>
+        normalizeDriverName(s.from_driver_name) === normalizeDriverName(r.driver_name) &&
+        r.work_date >= s.period_from &&
+        r.work_date <= s.period_to,
+      );
+      if (swap) return { ...r, driver_name: swap.to_driver_name, driver_code: swap.to_driver_code };
+      return r;
+    };
 
+    // 控除は行ごとに round せず、 率ごとに合算 → ×率 → round (累積誤差を避ける、 ClosingPage と統一)
+    const baseByRateByAgg = new Map<Agg, Map<number, number>>();
+    const addBase = (agg: Agg, rate: number, amount: number) => {
+      let m = baseByRateByAgg.get(agg);
+      if (!m) { m = new Map<number, number>(); baseByRateByAgg.set(agg, m); }
+      m.set(rate, (m.get(rate) ?? 0) + amount);
+    };
+
+    // 売上は2系統:
+    //   revenue_invoice: アスクル請求ベース = シートP列の単純合計 (swap 影響なし)
+    //   revenue_payment: ドライバー支払いベース = 車建日マスタ置換 + フォーム加算 (swap 適用後)
+    let revenue_invoice = 0;
     const aggMap = new Map<string, Agg>();
     for (const r of deliveries) {
-      const a = ensure(aggMap, r.driver_code, r.driver_name);
-      a.days.add(r.work_date);
-      a.count += 1;
-      a.quantity += r.quantity || 0;
-      // アスクル請求側: シート原データそのまま加算 (車建日も含む)
-      revenue_invoice += r.amount || 0;
-      // ドライバー支払側: 車建日はマスタ金額に置換するため後段で処理
-      const vehAmount = vehicleDayMap.get(mdKey(r.work_date));
+      revenue_invoice += r.amount || 0; // 請求側: シート原データそのまま
+      const rPay = applySwap(r);        // 支払側: 先ドライバーに付け替え
+      const a = ensure(aggMap, rPay.driver_code, rPay.driver_name);
+      const vehAmount = vehicleDayMap.get(mdKey(rPay.work_date));
       if (vehAmount !== undefined) {
-        a.vehicle_day_dates.add(r.work_date);
+        a.vehicle_day_dates.add(rPay.work_date); // 車建日: 後段で日単位 1 回だけ加算 (控除対象外)
       } else {
-        a.revenue += r.amount || 0;
-        const rate = getRateOn(a.driver_id, r.work_date, a.deduction_rate);
-        a.deduction_amount += Math.round(((r.amount || 0) * rate) / 100);
+        a.revenue += rPay.amount || 0;
+        const rate = getRateOn(a.driver_id, rPay.work_date, a.deduction_rate);
+        addBase(a, rate, rPay.amount || 0);
       }
     }
     for (const a of aggMap.values()) {
       for (const d of a.vehicle_day_dates) {
-        const amount = vehicleDayMap.get(mdKey(d)) ?? 0;
-        a.revenue += amount; // 控除対象外
+        a.revenue += vehicleDayMap.get(mdKey(d)) ?? 0; // 控除対象外
       }
     }
     for (const f of forms) {
       const a = ensure(aggMap, '', f.driver_name);
-      a.days.add(f.work_date);
-      a.revenue += f.amount;
-      if (formAdjustment(f.type) === 'kodate') {
-        const rate = getRateOn(a.driver_id, f.work_date, a.deduction_rate);
-        a.deduction_amount += Math.round((f.amount * rate) / 100);
+      a.revenue += f.amount; // フォームは全て車建扱い → 控除なし (ClosingPage と統一)
+    }
+    // 控除額: 率ごとに合算してから round
+    for (const a of aggMap.values()) {
+      const baseByRate = baseByRateByAgg.get(a);
+      if (baseByRate) {
+        let ded = 0;
+        for (const [rate, amount] of baseByRate) ded += Math.round((amount * rate) / 100);
+        a.deduction_amount = ded;
       }
     }
 
-    let revenue_payment = 0, deductionTotal = 0;
+    // ライブ集計 (確定前の月のフォールバック用)
+    let liveRevenuePayment = 0, liveDeduction = 0;
     for (const a of aggMap.values()) {
-      revenue_payment += a.revenue;
-      deductionTotal += a.deduction_amount;
+      liveRevenuePayment += a.revenue;
+      liveDeduction += a.deduction_amount;
     }
-    const driver_payment = revenue_payment - deductionTotal;
+    const liveDriverPayment = liveRevenuePayment - liveDeduction;
+
+    // ★ ドライバー支払いは「支払明細書を確定」で保存済みの closed_payment_statements を最優先。
+    //   確定データが唯一の正解 (ライブ再計算は swap/控除/丸めの微差で ClosingPage とズレるため)。
+    //   未確定の月のみライブ集計にフォールバック。
+    let driver_payment: number;
+    let driver_count: number;
+    let source: 'confirmed' | 'live';
+    if (closedRows.length > 0) {
+      driver_payment = closedRows.reduce((s, r) => s + Number(r.payment_amount || 0), 0);
+      driver_count = closedRows.length;
+      source = 'confirmed';
+    } else {
+      driver_payment = liveDriverPayment;
+      driver_count = aggMap.size;
+      source = 'live';
+    }
+
     const payment = driver_payment + employee_salary_total;
     // 利益 = アスクル請求 (税抜) - 全支払 (ドライバー + 社員)
     const profit = revenue_invoice - payment;
@@ -233,7 +284,7 @@ Deno.serve(async (req: Request) => {
 
     return json({
       period: { from, to },
-      revenue: revenue_invoice,  // 画面「総売上(税抜)」 = アスクル請求の税抜
+      revenue: revenue_invoice,  // 画面「総売上(税抜)」 = アスクル請求の税抜 (シートP列ライブ集計)
       payment,
       driver_payment,
       employee_salary_total,
@@ -241,7 +292,8 @@ Deno.serve(async (req: Request) => {
       profit,
       profit_rate,
       invoice,
-      driver_count: aggMap.size,
+      driver_count,
+      source,  // 'confirmed' = 確定データ使用 / 'live' = 未確定でライブ集計
     });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
