@@ -10,7 +10,31 @@ const corsHeaders = {
 const SPREADSHEET_ID = '1Wh280_jyUFOCjsd1XrBNMbEXCiVwcJ1pvGdYEEi8LOY';
 const DELIVERY_RANGE = 'DETA貼り付け!A2:P';
 const FORM_RANGE = 'フォームの回答 1!A2:G';
-const API_KEY = 'AIzaSyD8p7oPEYI1lXWBVnXBr3z96ON56NJG6hQ';
+const SERVICE_ACCOUNT = JSON.parse(Deno.env.get('GOOGLE_SERVICE_ACCOUNT_KEY')!);
+
+function b64url(s: string): string { return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+
+async function getAccessToken(): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const payload = b64url(JSON.stringify({
+    iss: SERVICE_ACCOUNT.client_email,
+    scope: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now, exp: now + 3600,
+  }));
+  const pemBody = SERVICE_ACCOUNT.private_key.replace(/-----BEGIN PRIVATE KEY-----/, '').replace(/-----END PRIVATE KEY-----/, '').replace(/\s/g, '');
+  const binaryDer = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey('pkcs8', binaryDer, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(`${header}.${payload}`));
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const jwt = `${header}.${payload}.${sigB64}`;
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+  return (await r.json()).access_token;
+}
 
 interface DeliveryRow {
   work_date: string;
@@ -46,15 +70,14 @@ function normalizeDriverName(name: string | undefined | null): string {
 // 特別日当 (フォーム入力) は種別問わず全て車建扱い (控除対象外) — ClosingPage と統一。
 // 旧ロジックは "個建" を含む種別に控除をかけていたが、 ClosingPage が全車建に変更済みのため追従。
 
-async function fetchSheet(range: string): Promise<(string | number)[][]> {
+async function fetchSheet(range: string, token: string): Promise<(string | number)[][]> {
   const url =
     'https://sheets.googleapis.com/v4/spreadsheets/' +
     encodeURIComponent(SPREADSHEET_ID) +
     '/values/' +
     encodeURIComponent(range) +
-    '?key=' + API_KEY +
-    '&majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE';
-  const res = await fetch(url);
+    '?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE';
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error(`Sheets ${range}: ${res.status} ${await res.text()}`);
   const j = (await res.json()) as { values?: (string | number)[][] };
   return j.values ?? [];
@@ -77,9 +100,10 @@ Deno.serve(async (req: Request) => {
     const closedYear = parseInt(to.slice(0, 4));
     const closedMonth = parseInt(to.slice(5, 7));
 
+    const gToken = await getAccessToken();
     const [deliveryValues, formValues, profilesRes, vehicleDaysRes, ratesRes, swapsRes, closedRes] = await Promise.all([
-      fetchSheet(DELIVERY_RANGE),
-      fetchSheet(FORM_RANGE),
+      fetchSheet(DELIVERY_RANGE, gToken),
+      fetchSheet(FORM_RANGE, gToken),
       admin.from('profiles').select('id, full_name, deduction_rate, business_type, monthly_salary, active'),
       admin.from('vehicle_days').select('month, day, amount').eq('active', true),
       admin.from('driver_deduction_rates').select('driver_id, effective_from, deduction_rate').order('effective_from'),

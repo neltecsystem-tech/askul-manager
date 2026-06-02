@@ -27,6 +27,9 @@ interface DeliveryRow {
 export default function DeliveriesPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
+  // 法人配下ドライバー (オーナー以外) は金額・単価を表示しない
+  // 配送実績の金額は法人オーナーの売上に該当するため
+  const hideMoney = profile?.business_type === 'corporation';
   const [records, setRecords] = useState<DeliveryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -195,7 +198,7 @@ export default function DeliveriesPage() {
       <div style={{ ...card, marginBottom: 16, display: 'flex', gap: 24 }}>
         <Stat label="件数" value={totals.count.toLocaleString()} />
         <Stat label="数量合計" value={totals.qty.toLocaleString()} />
-        <Stat label="金額合計" value={`¥${totals.amount.toLocaleString()}`} />
+        {!hideMoney && <Stat label="金額合計" value={`¥${totals.amount.toLocaleString()}`} />}
       </div>
 
       <div style={card}>
@@ -214,8 +217,8 @@ export default function DeliveriesPage() {
                   <th style={th}>荷主</th>
                   <th style={{ ...th, textAlign: 'right' }}>サイズ</th>
                   <th style={{ ...th, textAlign: 'right' }}>数量</th>
-                  <th style={{ ...th, textAlign: 'right' }}>単価</th>
-                  <th style={{ ...th, textAlign: 'right' }}>金額</th>
+                  {!hideMoney && <th style={{ ...th, textAlign: 'right' }}>単価</th>}
+                  {!hideMoney && <th style={{ ...th, textAlign: 'right' }}>金額</th>}
                 </tr>
               </thead>
               <tbody>
@@ -236,12 +239,16 @@ export default function DeliveriesPage() {
                     </td>
                     <td style={{ ...td, textAlign: 'right' }}>{r.size_code}</td>
                     <td style={{ ...td, textAlign: 'right' }}>{r.quantity.toLocaleString()}</td>
-                    <td style={{ ...td, textAlign: 'right' }}>
-                      ¥{r.unit_price.toLocaleString()}
-                    </td>
-                    <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>
-                      ¥{r.amount.toLocaleString()}
-                    </td>
+                    {!hideMoney && (
+                      <td style={{ ...td, textAlign: 'right' }}>
+                        ¥{r.unit_price.toLocaleString()}
+                      </td>
+                    )}
+                    {!hideMoney && (
+                      <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>
+                        ¥{r.amount.toLocaleString()}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
