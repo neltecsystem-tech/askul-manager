@@ -153,7 +153,7 @@ export const incidentStatusLabels: Record<IncidentStatus, string> = {
 
 export interface Incident {
   id: string;
-  occurred_at: string; // YYYY-MM-DD
+  occurred_at: string | null; // YYYY-MM-DD（不明な場合 null）
   reporter_name: string | null;
   target_driver_id: string | null;
   status: IncidentStatus;

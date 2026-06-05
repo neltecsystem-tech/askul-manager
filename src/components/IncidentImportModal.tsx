@@ -184,9 +184,10 @@ export default function IncidentImportModal({
   };
 
   const includedRows = rows.filter((r) => r.include);
-  // 発生日・内容が揃った行だけを実際に取り込む（不足行は自動スキップ）
-  const validRows = includedRows.filter((r) => r.occurred_at && r.content.trim());
+  // 内容がある行を取り込む（発生日が不明でも可。不足行は自動スキップ）
+  const validRows = includedRows.filter((r) => r.content.trim());
   const skippedCount = includedRows.length - validRows.length;
+  const noDateCount = validRows.filter((r) => !r.occurred_at).length;
   const unmatchedCount = validRows.filter((r) => !r.target_driver_id).length;
   const canImport = validRows.length > 0 && !saving;
 
@@ -196,7 +197,7 @@ export default function IncidentImportModal({
     setSaveError(null);
     const nowIso = new Date().toISOString();
     const payload = validRows.map((r) => ({
-      occurred_at: r.occurred_at,
+      occurred_at: r.occurred_at || null,
       target_driver_id: r.target_driver_id || null,
       // 未照合の場合は元の氏名を reporter_name に残す（一覧で表示される）
       reporter_name: r.target_driver_id ? null : r.driverNameRaw.trim() || null,
@@ -266,7 +267,12 @@ export default function IncidentImportModal({
               <strong>{validRows.length}</strong> 件
               {skippedCount > 0 && (
                 <span style={{ color: colors.danger, marginLeft: 8 }}>
-                  ※ 発生日・内容が未入力の {skippedCount} 件は自動スキップ（赤枠）。取り込むには修正してください。
+                  ※ 内容が空の {skippedCount} 件は自動スキップ。
+                </span>
+              )}
+              {noDateCount > 0 && (
+                <span style={{ color: '#b45309', marginLeft: 8 }}>
+                  ※ 発生日不明が {noDateCount} 件（日付なしで記録されます）。
                 </span>
               )}
               {unmatchedCount > 0 && (
@@ -290,7 +296,7 @@ export default function IncidentImportModal({
                 <tbody>
                   {rows.map((r, i) => {
                     const unmatched = r.include && !r.target_driver_id;
-                    const needsDate = r.include && !r.occurred_at;
+                    const noDate = r.include && !r.occurred_at;
                     return (
                       <tr key={i} style={{ background: r.include ? undefined : '#f3f4f6' }}>
                         <td style={{ ...td, textAlign: 'center' }}>
@@ -312,9 +318,12 @@ export default function IncidentImportModal({
                               ...input,
                               padding: '3px 6px',
                               fontSize: 12,
-                              ...(needsDate ? { borderColor: colors.danger } : {}),
+                              ...(noDate ? { borderColor: '#f59e0b', background: '#fffbeb' } : {}),
                             }}
                           />
+                          {noDate && (
+                            <div style={{ fontSize: 9, color: '#b45309' }}>不明可</div>
+                          )}
                         </td>
                         <td style={td}>
                           <select

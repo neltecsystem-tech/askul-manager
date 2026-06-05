@@ -83,7 +83,7 @@ export default function IncidentsPage() {
       supabase
         .from('incidents')
         .select('*')
-        .order('occurred_at', { ascending: false })
+        .order('occurred_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false }),
       supabase
         .from('profiles')
@@ -132,7 +132,7 @@ export default function IncidentsPage() {
     setEditing({
       mode: 'driver_fill',
       id: r.id,
-      occurred_at: r.occurred_at,
+      occurred_at: r.occurred_at ?? '',
       target_driver_id: r.target_driver_id ?? '',
       category: r.category ?? '',
       content: r.content,
@@ -147,7 +147,7 @@ export default function IncidentsPage() {
     setEditing({
       mode: 'admin_edit',
       id: r.id,
-      occurred_at: r.occurred_at,
+      occurred_at: r.occurred_at ?? '',
       target_driver_id: r.target_driver_id ?? '',
       category: r.category ?? '',
       content: r.content,
@@ -211,7 +211,7 @@ export default function IncidentsPage() {
       const { error } = await supabase
         .from('incidents')
         .update({
-          occurred_at: editing.occurred_at,
+          occurred_at: editing.occurred_at || null,
           target_driver_id: editing.target_driver_id || null,
           category: editing.category.trim() || null,
           content: editing.content.trim(),
@@ -273,7 +273,7 @@ export default function IncidentsPage() {
 
   const del = async (r: Incident) => {
     if (!isAdmin) return;
-    if (!confirm(`${r.occurred_at} の不具合記録を削除しますか?`)) return;
+    if (!confirm(`${r.occurred_at ?? '(日付不明)'} の不具合記録を削除しますか?`)) return;
     setError(null);
     const { error } = await supabase.from('incidents').delete().eq('id', r.id);
     if (error) setError(error.message);
@@ -425,7 +425,11 @@ export default function IncidentsPage() {
                       }}
                       onClick={() => toggleExpand(r.id)}
                     >
-                      <td style={{ ...td, whiteSpace: 'nowrap' }}>{r.occurred_at}</td>
+                      <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                        {r.occurred_at ?? (
+                          <span style={{ color: colors.textMuted, fontSize: 11 }}>日付不明</span>
+                        )}
+                      </td>
                       <td style={td}>{targetName}</td>
                       <td style={td}>
                         {r.category ? (
