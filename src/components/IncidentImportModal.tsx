@@ -184,16 +184,18 @@ export default function IncidentImportModal({
   };
 
   const includedRows = rows.filter((r) => r.include);
-  const blockingRows = includedRows.filter((r) => !r.occurred_at || !r.content.trim());
-  const unmatchedCount = includedRows.filter((r) => !r.target_driver_id).length;
-  const canImport = includedRows.length > 0 && blockingRows.length === 0 && !saving;
+  // 発生日・内容が揃った行だけを実際に取り込む（不足行は自動スキップ）
+  const validRows = includedRows.filter((r) => r.occurred_at && r.content.trim());
+  const skippedCount = includedRows.length - validRows.length;
+  const unmatchedCount = validRows.filter((r) => !r.target_driver_id).length;
+  const canImport = validRows.length > 0 && !saving;
 
   const doImport = async () => {
     if (!canImport) return;
     setSaving(true);
     setSaveError(null);
     const nowIso = new Date().toISOString();
-    const payload = includedRows.map((r) => ({
+    const payload = validRows.map((r) => ({
       occurred_at: r.occurred_at,
       target_driver_id: r.target_driver_id || null,
       // 未照合の場合は元の氏名を reporter_name に残す（一覧で表示される）
@@ -260,11 +262,11 @@ export default function IncidentImportModal({
         {rows.length > 0 && (
           <>
             <div style={{ fontSize: 12, marginBottom: 8 }}>
-              読み込み {rows.length} 件 ／ 取込対象{' '}
-              <strong>{includedRows.length}</strong> 件
-              {blockingRows.length > 0 && (
+              読み込み {rows.length} 件 ／ 取込{' '}
+              <strong>{validRows.length}</strong> 件
+              {skippedCount > 0 && (
                 <span style={{ color: colors.danger, marginLeft: 8 }}>
-                  ※ 発生日・内容が未入力の行が {blockingRows.length} 件あります（赤枠）。修正するか取込対象から外してください。
+                  ※ 発生日・内容が未入力の {skippedCount} 件は自動スキップ（赤枠）。取り込むには修正してください。
                 </span>
               )}
               {unmatchedCount > 0 && (
@@ -363,7 +365,7 @@ export default function IncidentImportModal({
             キャンセル
           </button>
           <button style={btnPrimary} onClick={doImport} disabled={!canImport}>
-            {saving ? '取込中...' : `${includedRows.length}件を承認済で取込`}
+            {saving ? '取込中...' : `${validRows.length}件を承認済で取込`}
           </button>
         </div>
       </div>
