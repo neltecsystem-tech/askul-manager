@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import type { Incident, IncidentStatus, Profile } from '../types/db';
 import { incidentStatusLabels } from '../types/db';
 import PageHeader from '../components/PageHeader';
+import IncidentImportModal from '../components/IncidentImportModal';
 import { btn, btnDanger, btnPrimary, card, colors, input, table, td, th } from '../lib/ui';
 
 type EditMode = 'new' | 'driver_fill' | 'admin_edit';
@@ -67,6 +68,7 @@ export default function IncidentsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | 'all'>('all');
+  const [showImport, setShowImport] = useState(false);
 
   const driverNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -336,9 +338,16 @@ export default function IncidentsPage() {
       <PageHeader
         title="不具合登録"
         actions={
-          <button style={btnPrimary} onClick={openNew} disabled={!profile}>
-            新規追加
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {isAdmin && (
+              <button style={btn} onClick={() => setShowImport(true)}>
+                一括取込
+              </button>
+            )}
+            <button style={btnPrimary} onClick={openNew} disabled={!profile}>
+              新規追加
+            </button>
+          </div>
         }
       />
 
@@ -521,6 +530,19 @@ export default function IncidentsPage() {
           </table>
         )}
       </div>
+
+      {showImport && profile && (
+        <IncidentImportModal
+          drivers={drivers}
+          existing={rows}
+          adminId={profile.id}
+          onClose={() => setShowImport(false)}
+          onComplete={async () => {
+            await load();
+            window.dispatchEvent(new Event('incidents-updated'));
+          }}
+        />
+      )}
 
       {editing && (
         <div style={modal.overlay}>
