@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Incident, IncidentStatus, Profile } from '../types/db';
 import { incidentStatusLabels } from '../types/db';
 import PageHeader from '../components/PageHeader';
-import { card, colors } from '../lib/ui';
+import { btn, card, colors } from '../lib/ui';
+import { exportElementToPdf } from '../lib/pdf';
 
 const STATUS_COLORS: Record<IncidentStatus, string> = {
   pending_driver: '#f59e0b',
@@ -34,6 +35,19 @@ export default function IncidentAnalyticsPage() {
   const [drivers, setDrivers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [year, setYear] = useState<string>('all');
+  const [exporting, setExporting] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
+
+  const exportPdf = async () => {
+    if (!reportRef.current) return;
+    setExporting(true);
+    try {
+      const suffix = year === 'all' ? '全期間' : `${year}年`;
+      await exportElementToPdf(reportRef.current, `不具合分析_${suffix}.pdf`);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -118,24 +132,29 @@ export default function IncidentAnalyticsPage() {
       <PageHeader
         title="不具合分析"
         actions={
-          <select
-            value={year}
-            onChange={(e) => setYear(e.target.value)}
-            style={{
-              padding: '6px 10px',
-              border: `1px solid ${colors.border}`,
-              borderRadius: 4,
-              fontSize: 13,
-              background: '#fff',
-            }}
-          >
-            <option value="all">全期間</option>
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}年
-              </option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <select
+              value={year}
+              onChange={(e) => setYear(e.target.value)}
+              style={{
+                padding: '6px 10px',
+                border: `1px solid ${colors.border}`,
+                borderRadius: 4,
+                fontSize: 13,
+                background: '#fff',
+              }}
+            >
+              <option value="all">全期間</option>
+              {years.map((y) => (
+                <option key={y} value={y}>
+                  {y}年
+                </option>
+              ))}
+            </select>
+            <button style={btn} onClick={exportPdf} disabled={loading || stats.total === 0 || exporting}>
+              {exporting ? 'PDF生成中...' : 'PDF出力'}
+            </button>
+          </div>
         }
       />
 
@@ -144,7 +163,10 @@ export default function IncidentAnalyticsPage() {
       ) : stats.total === 0 ? (
         <div style={{ ...card, color: colors.textMuted }}>対象の不具合データがありません。</div>
       ) : (
-        <>
+        <div ref={reportRef} style={{ background: colors.bg, padding: 2 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>
+            不具合分析（{year === 'all' ? '全期間' : `${year}年`}）
+          </div>
           {/* サマリーカード */}
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
             <SummaryCard label="総件数" value={stats.total} color={colors.text} />
@@ -223,7 +245,7 @@ export default function IncidentAnalyticsPage() {
               />
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

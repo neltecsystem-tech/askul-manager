@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { parseQualitySheet, type QualityData } from '../lib/quality';
+import { exportElementToPdf } from '../lib/pdf';
 import PageHeader from '../components/PageHeader';
 import { btn, btnDanger, btnPrimary, card, colors, table, td, th } from '../lib/ui';
 
@@ -34,6 +35,8 @@ export default function QualityReportPage() {
   const [pending, setPending] = useState<{ data: QualityData; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -116,6 +119,17 @@ export default function QualityReportPage() {
   };
 
   const view = pending?.data ?? current?.data ?? null;
+  const viewTitle = pending ? pending.name.replace(/\.[^.]+$/, '') : current?.title ?? '品質実績';
+
+  const exportPdf = async () => {
+    if (!reportRef.current) return;
+    setExporting(true);
+    try {
+      await exportElementToPdf(reportRef.current, `${viewTitle}.pdf`);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div>
@@ -135,6 +149,11 @@ export default function QualityReportPage() {
                   </option>
                 ))}
               </select>
+            )}
+            {view && (
+              <button style={btn} onClick={exportPdf} disabled={exporting}>
+                {exporting ? 'PDF生成中...' : 'PDF出力'}
+              </button>
             )}
             {isAdmin && (
               <>
@@ -197,7 +216,10 @@ export default function QualityReportPage() {
           品質実績データがありません。{isAdmin ? '右上の「Excel取込」から品質実績Excelを取り込んでください。' : ''}
         </div>
       ) : (
-        <QualityView data={view} />
+        <div ref={reportRef} style={{ background: colors.bg, padding: 2 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{viewTitle}</div>
+          <QualityView data={view} />
+        </div>
       )}
 
       {current && !pending && isAdmin && (
