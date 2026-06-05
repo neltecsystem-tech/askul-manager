@@ -23,6 +23,7 @@ import WorkItemsPage from './pages/admin/WorkItemsPage';
 import WorkRecordsPage from './pages/WorkRecordsPage';
 import IncidentsPage from './pages/IncidentsPage';
 import IncidentAnalyticsPage from './pages/IncidentAnalyticsPage';
+import QualityReportPage from './pages/QualityReportPage';
 import CoursesMapPage from './pages/admin/CoursesMapPage';
 import PagePermissionsPage from './pages/admin/PagePermissionsPage';
 import PaymentStatementsPage from './pages/PaymentStatementsPage';
@@ -121,6 +122,14 @@ export default function App() {
               element={
                 <RequireAdmin>
                   <IncidentAnalyticsPage />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="quality-report"
+              element={
+                <RequireAdmin>
+                  <QualityReportPage />
                 </RequireAdmin>
               }
             />
