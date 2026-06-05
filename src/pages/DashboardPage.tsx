@@ -25,6 +25,24 @@ function todayLabel(): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (${dow})`;
 }
 
+function fmtDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// 請求と同じ締めサイクル: 前月21日〜当月20日
+function billingCycle(): { from: string; to: string } {
+  const now = new Date();
+  return {
+    from: fmtDate(new Date(now.getFullYear(), now.getMonth() - 1, 21)),
+    to: fmtDate(new Date(now.getFullYear(), now.getMonth(), 20)),
+  };
+}
+
+function mdLabel(ymd: string): string {
+  const [, m, d] = ymd.split('-');
+  return `${Number(m)}/${Number(d)}`;
+}
+
 export default function DashboardPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
@@ -49,11 +67,8 @@ export default function DashboardPage() {
       const yd = new Date();
       yd.setDate(yd.getDate() - 1);
       const yesterday = `${yd.getFullYear()}-${String(yd.getMonth() + 1).padStart(2, '0')}-${String(yd.getDate()).padStart(2, '0')}`;
-      // 今月の範囲
-      const now = new Date();
-      const mFrom = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-      const mTo = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+      // 今月の範囲 (請求と同じ締めサイクル: 前月21日〜当月20日)
+      const { from: mFrom, to: mTo } = billingCycle();
 
       const [asgRes, courseRes, drvRes, offRes, incYesRes, incMonRes] = await Promise.all([
         supabase.from('shift_assignments').select('*').eq('work_date', today),
@@ -226,7 +241,12 @@ export default function DashboardPage() {
         </Link>
         <Link to="/incidents" style={statLink}>
           <div style={statCard}>
-            <div style={statLabel}>今月の不具合件数</div>
+            <div style={statLabel}>
+              今月の不具合件数{' '}
+              <span style={{ fontWeight: 400 }}>
+                ({mdLabel(billingCycle().from)}〜{mdLabel(billingCycle().to)})
+              </span>
+            </div>
             <div
               style={{
                 ...statValue,
