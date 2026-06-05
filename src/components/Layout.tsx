@@ -39,6 +39,7 @@ const DEFAULT_ITEMS: { key: string; label: string; fallbackAdmin: boolean; fallb
   { key: 'shifts', label: 'シフト', fallbackAdmin: true, fallbackDriver: true },
   { key: 'work-records', label: '稼働登録', fallbackAdmin: true, fallbackDriver: true },
   { key: 'incidents', label: '不具合登録', fallbackAdmin: true, fallbackDriver: true },
+  { key: 'incident-analytics', label: '不具合分析', fallbackAdmin: true, fallbackDriver: false },
   { key: 'courses-map', label: 'コースエリア地図', fallbackAdmin: true, fallbackDriver: false },
   { key: 'deliveries', label: '配送実績 (全員)', fallbackAdmin: true, fallbackDriver: false },
   { key: 'my-deliveries', label: '自分の配送実績', fallbackAdmin: true, fallbackDriver: true },

@@ -22,6 +22,7 @@ import SpecialDatesPage from './pages/admin/SpecialDatesPage';
 import WorkItemsPage from './pages/admin/WorkItemsPage';
 import WorkRecordsPage from './pages/WorkRecordsPage';
 import IncidentsPage from './pages/IncidentsPage';
+import IncidentAnalyticsPage from './pages/IncidentAnalyticsPage';
 import CoursesMapPage from './pages/admin/CoursesMapPage';
 import PagePermissionsPage from './pages/admin/PagePermissionsPage';
 import PaymentStatementsPage from './pages/PaymentStatementsPage';
@@ -115,6 +116,14 @@ export default function App() {
             />
             <Route path="work-records" element={<WorkRecordsPage />} />
             <Route path="incidents" element={<IncidentsPage />} />
+            <Route
+              path="incident-analytics"
+              element={
+                <RequireAdmin>
+                  <IncidentAnalyticsPage />
+                </RequireAdmin>
+              }
+            />
             <Route path="payment-statements" element={<PaymentStatementsPage />} />
             <Route
               path="settings"
