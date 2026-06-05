@@ -184,9 +184,8 @@ export default function IncidentImportModal({
   };
 
   const includedRows = rows.filter((r) => r.include);
-  const blockingRows = includedRows.filter(
-    (r) => !r.occurred_at || !r.content.trim() || !r.target_driver_id,
-  );
+  const blockingRows = includedRows.filter((r) => !r.occurred_at || !r.content.trim());
+  const unmatchedCount = includedRows.filter((r) => !r.target_driver_id).length;
   const canImport = includedRows.length > 0 && blockingRows.length === 0 && !saving;
 
   const doImport = async () => {
@@ -197,6 +196,8 @@ export default function IncidentImportModal({
     const payload = includedRows.map((r) => ({
       occurred_at: r.occurred_at,
       target_driver_id: r.target_driver_id || null,
+      // 未照合の場合は元の氏名を reporter_name に残す（一覧で表示される）
+      reporter_name: r.target_driver_id ? null : r.driverNameRaw.trim() || null,
       category: r.category.trim() || null,
       content: r.content.trim(),
       cause: null,
@@ -263,7 +264,12 @@ export default function IncidentImportModal({
               <strong>{includedRows.length}</strong> 件
               {blockingRows.length > 0 && (
                 <span style={{ color: colors.danger, marginLeft: 8 }}>
-                  ※ 該当者・発生日・内容が未確定の行が {blockingRows.length} 件あります（赤枠）。修正するか取込対象から外してください。
+                  ※ 発生日・内容が未入力の行が {blockingRows.length} 件あります（赤枠）。修正するか取込対象から外してください。
+                </span>
+              )}
+              {unmatchedCount > 0 && (
+                <span style={{ color: '#b45309', marginLeft: 8 }}>
+                  ※ 該当者が未照合の行が {unmatchedCount} 件（氏名はそのまま記録されます）。
                 </span>
               )}
             </div>
@@ -281,7 +287,7 @@ export default function IncidentImportModal({
                 </thead>
                 <tbody>
                   {rows.map((r, i) => {
-                    const needsDriver = r.include && !r.target_driver_id;
+                    const unmatched = r.include && !r.target_driver_id;
                     const needsDate = r.include && !r.occurred_at;
                     return (
                       <tr key={i} style={{ background: r.include ? undefined : '#f3f4f6' }}>
@@ -317,7 +323,7 @@ export default function IncidentImportModal({
                               padding: '3px 6px',
                               fontSize: 12,
                               width: '100%',
-                              ...(needsDriver ? { borderColor: colors.danger } : {}),
+                              ...(unmatched ? { borderColor: '#f59e0b', background: '#fffbeb' } : {}),
                             }}
                           >
                             <option value="">
