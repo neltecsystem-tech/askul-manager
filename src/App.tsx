@@ -24,6 +24,7 @@ import WorkRecordsPage from './pages/WorkRecordsPage';
 import IncidentsPage from './pages/IncidentsPage';
 import IncidentAnalyticsPage from './pages/IncidentAnalyticsPage';
 import QualityReportPage from './pages/QualityReportPage';
+import ManualPage from './pages/ManualPage';
 import CoursesMapPage from './pages/admin/CoursesMapPage';
 import PagePermissionsPage from './pages/admin/PagePermissionsPage';
 import PaymentStatementsPage from './pages/PaymentStatementsPage';
@@ -134,6 +135,7 @@ export default function App() {
               }
             />
             <Route path="payment-statements" element={<PaymentStatementsPage />} />
+            <Route path="manual" element={<ManualPage />} />
             <Route
               path="settings"
               element={

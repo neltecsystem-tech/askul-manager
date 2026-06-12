@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>アスクル配送管理ツール マニュアル</title>
+<style>
+  :root{--primary:#2563eb;--ink:#1f2937;--sub:#6b7280;--line:#d1d5db;--soft:#f3f4f6;--accent:#b45309;--danger:#dc2626;--ok:#15803d;}
+  *{box-sizing:border-box;}
+  html{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  body{font-family:"Meiryo","Hiragino Kaku Gothic ProN",sans-serif;color:var(--ink);margin:0;line-height:1.7;font-size:14px;background:#e5e7eb;}
+  .page{background:#fff;width:210mm;min-height:297mm;margin:10px auto;padding:18mm 16mm;box-shadow:0 1px 6px rgba(0,0,0,.2);}
+  h1{font-size:26px;margin:0 0 4px;color:var(--primary);}
+  h2{font-size:19px;margin:28px 0 10px;padding:6px 10px;background:var(--primary);color:#fff;border-radius:5px;}
+  h3{font-size:16px;margin:18px 0 6px;color:var(--primary);border-bottom:2px solid var(--line);padding-bottom:3px;}
+  p{margin:6px 0;} ul,ol{margin:6px 0 10px;padding-left:1.4em;} li{margin:3px 0;}
+  code{background:var(--soft);padding:1px 6px;border-radius:4px;font-size:13px;font-family:Consolas,monospace;}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top;}
+  th{background:var(--soft);font-weight:700;white-space:nowrap;}
+  .tag{display:inline-block;background:var(--primary);color:#fff;border-radius:4px;padding:1px 8px;font-size:12px;font-weight:700;}
+  .note{background:#fffbeb;border:1px solid #fcd34d;border-left:4px solid var(--accent);padding:8px 12px;border-radius:4px;margin:10px 0;font-size:13px;}
+  .warn{background:#fef2f2;border:1px solid #fca5a5;border-left:4px solid var(--danger);padding:8px 12px;border-radius:4px;margin:10px 0;font-size:13px;}
+  .step{counter-reset:step;list-style:none;padding-left:0;}
+  .step>li{position:relative;padding-left:30px;margin:8px 0;}
+  .step>li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:0;background:var(--primary);color:#fff;width:21px;height:21px;border-radius:50%;text-align:center;font-size:12px;line-height:21px;font-weight:700;}
+  .toolbar{position:fixed;top:12px;right:12px;z-index:99;}
+  .toolbar button{background:var(--primary);color:#fff;border:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.25);}
+  .muted{color:var(--sub);font-size:12px;}
+  .pgbreak{page-break-before:always;}
+  @media print{body{background:#fff;}.page{box-shadow:none;margin:0;width:auto;min-height:auto;padding:14mm 12mm;}.toolbar{display:none;}}
+  @page{size:A4;margin:0;}
+</style>
+</head>
+<body>
+<div class="toolbar"><button onclick="window.print()">🖨 印刷 / PDF保存</button></div>
+
+<section class="page">
+  <div style="text-align:center;padding:60px 0;">
+    <div class="muted" style="letter-spacing:2px;">NELTEC 社内システム</div>
+    <h1 style="font-size:32px;margin:14px 0;">アスクル配送管理ツール<br>操作マニュアル</h1>
+    <div class="muted">配送実績・コース割・請求/支払明細・不具合管理・品質実績</div>
+    <div style="margin-top:36px;border:2px solid var(--primary);border-radius:10px;padding:18px 26px;display:inline-block;text-align:left;font-size:13px;">
+      <div><b>URL</b>：<code>https://neltecsystem-tech.github.io/askul-manager/</code></div>
+      <div><b>ログイン</b>：配布されたID（例 <code>0001@askul.local</code>）＋パスワード</div>
+      <div><b>推奨ブラウザ</b>：Chrome / Edge（最新版）</div>
+    </div>
+  </div>
+</section>
+
+<section class="page">
+  <h2>1. はじめに</h2>
+  <h3>ログイン</h3>
+  <ol class="step">
+    <li>配布されたID（例 <code>0001@askul.local</code>）とパスワードを入力します。</li>
+    <li>ドライバー本人のIDで入ると、自分の配送実績・支払明細が見られます。</li>
+  </ol>
+  <h3>画面の切り替え</h3>
+  <p>左メニュー（スマホは左上の☰）から各画面に移動します。<b>管理者とドライバーで表示メニューが異なります</b>。</p>
+  <div class="note">表示が変な日本語になる場合は、ブラウザの自動翻訳がオンになっていないか確認してください。</div>
+
+  <h2>2. ダッシュボード</h2>
+  <p>本日のコース担当、不具合の発生状況（前日・今月＝<b>請求と同じ21日〜20日サイクル</b>）を確認できます。</p>
+
+  <h2>3. 配送実績</h2>
+  <table>
+    <tr><th>画面</th><th>内容</th></tr>
+    <tr><td>配送実績（管理者）</td><td>Google スプレッドシートの実績を直接参照。Driveのファイルから取込可（重複管理番号は自動スキップ）</td></tr>
+    <tr><td>自分の配送実績</td><td>ドライバーが自分の実績を月別表示。法人所属は金額非表示、法人オーナーは同社分も閲覧可</td></tr>
+    <tr><td>稼働登録</td><td>日々の稼働を記録</td></tr>
+  </table>
+</section>
+
+<section class="page">
+  <h2>4. 不具合登録・分析</h2>
+  <h3>不具合の登録〜承認</h3>
+  <ol class="step">
+    <li>「新規追加」で発生日・該当者・内容を登録します（該当ドライバーへ）。</li>
+    <li>該当ドライバーが原因／対策を記入して提出します。</li>
+    <li>管理者が承認します（差し戻しも可能）。</li>
+  </ol>
+  <h3>一括取込（Excel）</h3>
+  <p>品質実績Excelの「不良配送」シートを <span class="tag">一括取込</span> で読み込めます。氏名からドライバーを自動照合し、<b>承認済み</b>として登録します。発生日が不明な行も取り込めます。</p>
+  <h3>不具合分析</h3>
+  <p>月別件数・区分別・該当者別をグラフ表示。右上 <span class="tag">PDF出力</span> でPDF保存できます。</p>
+
+  <h2>5. 品質実績</h2>
+  <ol class="step">
+    <li>右上 <span class="tag">Excel取込</span> で品質実績Excelの「品質実績」シートを読み込みます。</li>
+    <li>プレビューを確認して「保存」します（月次データを蓄積）。</li>
+    <li>不良率(ALL)の月別推移（目標ライン付き）・件数推移・区分別マトリクスを表示。<span class="tag">PDF出力</span> 可。</li>
+  </ol>
+  <div class="note">PPM(百万分率) = 不良件数 ÷ 配完個数 × 1,000,000。通期が目標超過は赤字表示です。</div>
+
+  <h2>6. 月次締め・請求・支払明細</h2>
+  <table>
+    <tr><th>機能</th><th>内容</th></tr>
+    <tr><td>月次締め / 請求書</td><td>締め期間（前月21日〜当月20日）で作成。全員分を一括ZIP（個別PDF）出力可</td></tr>
+    <tr><td>支払明細書</td><td>ドライバー別の月次明細。控除率は日付時点の履歴で計算、車建は控除対象外</td></tr>
+    <tr><td>立替金精算 / 特別日当</td><td>立替金はシート連携、特別日当（車建/個建+）はフォーム回答から自動加算</td></tr>
+  </table>
+</section>
+
+<section class="page">
+  <h2>7. マスタ・地図（管理者）</h2>
+  <ul>
+    <li><b>各種マスタ</b>：営業所・サイズ区分・コース・車建日</li>
+    <li><b>コースエリア地図</b>：Leaflet地図でコースのエリア（ポリゴン）を描画・保存</li>
+    <li><b>データ付け替え</b>：配送データの担当変更など</li>
+  </ul>
+
+  <h2>8. 管理者向け</h2>
+  <h3>ドライバー管理</h3>
+  <p>ドライバーの追加・編集。事業形態（個人事業主／法人／法人オーナー／社員）、控除率（適用開始日付きで履歴管理）、インボイス番号を設定できます。</p>
+  <h3>表示ページ設定</h3>
+  <p>設定画面で、各画面を管理者／ドライバーに表示するかを切り替えられます（メニューに反映）。</p>
+
+  <h2>9. 困ったとき（FAQ）</h2>
+  <table>
+    <tr><th>症状</th><th>対処</th></tr>
+    <tr><td>文字が変な日本語になる</td><td>ブラウザの自動翻訳をオフにする</td></tr>
+    <tr><td>最新の状態にならない</td><td>再読み込み（Ctrl + Shift + R）</td></tr>
+    <tr><td>金額が表示されない</td><td>法人所属は仕様で非表示。法人オーナー・管理者は表示</td></tr>
+  </table>
+  <div class="note" style="margin-top:24px;">不明点はシステム担当（NELTEC）までご連絡ください。</div>
+</section>
+</body>
+</html>
