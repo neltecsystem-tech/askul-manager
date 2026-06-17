@@ -43,6 +43,7 @@ const DEFAULT_ITEMS: { key: string; label: string; fallbackAdmin: boolean; fallb
   { key: 'quality-report', label: '品質実績', fallbackAdmin: true, fallbackDriver: false },
   { key: 'courses-map', label: 'コースエリア地図', fallbackAdmin: true, fallbackDriver: false },
   { key: 'deliveries', label: '配送実績 (全員)', fallbackAdmin: true, fallbackDriver: false },
+  { key: 'monthly-volume', label: '各月の取扱個数', fallbackAdmin: true, fallbackDriver: false },
   { key: 'my-deliveries', label: '自分の配送実績', fallbackAdmin: true, fallbackDriver: true },
   { key: 'expenses', label: '立替金精算', fallbackAdmin: true, fallbackDriver: false },
   { key: 'special-allowance', label: '特別日当 登録', fallbackAdmin: true, fallbackDriver: false },

@@ -10,6 +10,7 @@ import CoursesPage from './pages/admin/CoursesPage';
 import DriversPage from './pages/admin/DriversPage';
 import DeliveriesPage from './pages/DeliveriesPage';
 import MyDeliveriesPage from './pages/MyDeliveriesPage';
+import MonthlyVolumePage from './pages/MonthlyVolumePage';
 import ClosingPage from './pages/admin/ClosingPage';
 import VehicleDaysPage from './pages/admin/VehicleDaysPage';
 import ExpensesPage from './pages/admin/ExpensesPage';
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="shifts" element={<ShiftsPage />} />
             <Route path="deliveries" element={<DeliveriesPage />} />
             <Route path="my-deliveries" element={<MyDeliveriesPage />} />
+            <Route path="monthly-volume" element={<MonthlyVolumePage />} />
             <Route
               path="expenses"
               element={
