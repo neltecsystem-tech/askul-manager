@@ -14,10 +14,26 @@ interface DeliveryRow {
   amount: number;
 }
 
-const ym = (d: string) => (d || '').slice(0, 7); // YYYY-MM
+// 締めサイクル: 前月21日〜当月20日 を「その月度」とする (ClosingPage と同じ基準)
+// 例: 4/21〜5/20 → 5月度
+const billingMonth = (dateStr: string): string => {
+  const [y, m, d] = (dateStr || '').split('-').map(Number);
+  if (!y || !m || !d) return '';
+  let year = y;
+  let month = m;
+  if (d >= 21) {
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return `${year}-${String(month).padStart(2, '0')}`;
+};
 const ymLabel = (s: string) => {
-  const [y, m] = s.split('-');
-  return y && m ? `${y}年${parseInt(m, 10)}月` : s;
+  const [y, m] = s.split('-').map(Number);
+  if (!y || !m) return s;
+  return `${y}年${m}月度`;
 };
 
 export default function MonthlyVolumePage() {
@@ -68,7 +84,7 @@ export default function MonthlyVolumePage() {
   const monthly = useMemo(() => {
     const map = new Map<string, { qty: number; count: number; amount: number }>();
     for (const r of filtered) {
-      const key = ym(r.work_date);
+      const key = billingMonth(r.work_date);
       if (!key) continue;
       const a = map.get(key) ?? { qty: 0, count: 0, amount: 0 };
       a.qty += r.quantity || 0;
@@ -94,7 +110,7 @@ export default function MonthlyVolumePage() {
   const matrix = useMemo(() => {
     const map = new Map<string, Map<string, number>>(); // month -> shipper -> qty
     for (const r of filtered) {
-      const key = ym(r.work_date);
+      const key = billingMonth(r.work_date);
       if (!key) continue;
       const row = map.get(key) ?? new Map<string, number>();
       row.set(r.shipper_name || '(不明)', (row.get(r.shipper_name || '(不明)') ?? 0) + (r.quantity || 0));
@@ -137,6 +153,10 @@ export default function MonthlyVolumePage() {
       {error && (
         <div style={{ color: '#dc2626', marginBottom: 12, whiteSpace: 'pre-wrap' }}>{error}</div>
       )}
+
+      <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 12 }}>
+        ※ 各月度 = <strong>前月21日〜当月20日</strong>（締めサイクル）。例: 5月度 = 4/21〜5/20
+      </div>
 
       <div style={{ ...card, marginBottom: 16, display: 'flex', gap: 16, alignItems: 'end', flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: colors.textMuted }}>
