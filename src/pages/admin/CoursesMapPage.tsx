@@ -84,6 +84,10 @@ export default function CoursesMapPage() {
   const wardsLayerRef = useRef<L.GeoJSON | null>(null);
   const wardLabelsRef = useRef<L.LayerGroup | null>(null);
   const detailLayerRef = useRef<L.LayerGroup | null>(null);
+  // 丁目/町ラベル専用のサブレイヤー (詳細レイヤー配下。ラベルだけ差し替え可能にする)
+  const chomeLabelLayerRef = useRef<L.LayerGroup | null>(null);
+  // 詳細表示中の区の丁目フィーチャー (ラベル再描画用に保持)
+  const detailWardFeaturesRef = useRef<GeoJSON.Feature[]>([]);
   const exitDetailRef = useRef<(() => void) | null>(null);
   const mainlandBoundsRef = useRef<L.LatLngBounds | null>(null);
   const selectedTownsRef = useRef<Map<TownKey, GeoJSON.Feature[]>>(new Map());
@@ -114,6 +118,15 @@ export default function CoursesMapPage() {
   useEffect(() => {
     chomeClickModeRef.current = chomeClickMode;
   }, [chomeClickMode]);
+  // 丁目ラベル表示モード: ON で「沢井1丁目」、OFF で町単位「沢井」
+  const [chomeLabelMode, setChomeLabelMode] = useState(false);
+  const chomeLabelModeRef = useRef(false);
+  const renderChomeLabelsRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    chomeLabelModeRef.current = chomeLabelMode;
+    if (detailWardName) renderChomeLabelsRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chomeLabelMode]);
 
   // コース別の色マップ (sort_order 順のインデックスで自動割当)
   const courseColorMap = useMemo(() => {
@@ -310,6 +323,63 @@ export default function CoursesMapPage() {
       markDirtyRef.current();
     };
 
+    // 詳細表示中の区について、現在のモードに応じてラベルを (再) 描画する。
+    // chomeLabelMode ON: 各丁目の重心に「沢井1丁目」/ OFF: 同じ町名をまとめた重心に「沢井」
+    const renderChomeLabels = () => {
+      const group = detailLayerRef.current;
+      if (!group) return;
+      if (chomeLabelLayerRef.current) {
+        chomeLabelLayerRef.current.clearLayers();
+      } else {
+        chomeLabelLayerRef.current = L.layerGroup().addTo(group);
+      }
+      const labelGroup = chomeLabelLayerRef.current;
+      const mkLabel = (center: L.LatLng, text: string) => {
+        const icon = L.divIcon({
+          className: 'town-label-icon',
+          html: `<div>${text}</div>`,
+          iconSize: [80, 14],
+          iconAnchor: [40, 7],
+        });
+        L.marker(center, { icon, interactive: false, keyboard: false }).addTo(labelGroup);
+      };
+      const feats = detailWardFeaturesRef.current;
+      if (chomeLabelModeRef.current) {
+        // 丁目単位: 各丁目の重心に MOJI をそのまま表示
+        for (const f of feats) {
+          const moji = (f.properties as { MOJI?: string } | null)?.MOJI ?? '';
+          if (!moji) continue;
+          const c = featureCenter(f);
+          if (c) mkLabel(c, moji);
+        }
+      } else {
+        // 町単位: 同じ町名の全丁目をまとめた重心に1つ
+        const byTown = new Map<string, GeoJSON.Feature[]>();
+        for (const f of feats) {
+          const moji = (f.properties as { MOJI?: string } | null)?.MOJI ?? '';
+          if (!moji) continue;
+          const townName = extractTownName(moji);
+          if (!byTown.has(townName)) byTown.set(townName, []);
+          byTown.get(townName)!.push(f);
+        }
+        for (const [townName, tf] of byTown) {
+          let sumLat = 0;
+          let sumLng = 0;
+          let cnt = 0;
+          for (const f of tf) {
+            const c = featureCenter(f);
+            if (c) {
+              sumLat += c.lat;
+              sumLng += c.lng;
+              cnt++;
+            }
+          }
+          if (cnt > 0) mkLabel(L.latLng(sumLat / cnt, sumLng / cnt), townName);
+        }
+      }
+    };
+    renderChomeLabelsRef.current = renderChomeLabels;
+
     const loadChomeForWard = async (wardName: string, group: L.LayerGroup) => {
       setChomeLoading(true);
       try {
@@ -321,8 +391,7 @@ export default function CoursesMapPage() {
           console.warn(`${wardName}: 町丁目データなし`);
           return;
         }
-        // 丁目単位で個別にポリゴン描画。ラベルは 町 単位で集約表示。
-        const byTown = new Map<string, GeoJSON.Feature[]>();
+        // 丁目単位で個別にポリゴン描画。ラベルは renderChomeLabels で別途描画。
         for (const f of wardFeatures) {
           const moji = (f.properties as { MOJI?: string } | null)?.MOJI ?? '';
           if (!moji) continue;
@@ -355,39 +424,11 @@ export default function CoursesMapPage() {
           });
           gjLayer.addTo(group);
           townLayersRef.current.set(key, gjLayer);
-
-          const townName = extractTownName(moji);
-          if (!byTown.has(townName)) byTown.set(townName, []);
-          byTown.get(townName)!.push(f);
         }
-        // 町単位のラベル (複数丁目をまとめた重心に1つ)
-        for (const [townName, feats] of byTown) {
-          let sumLat = 0;
-          let sumLng = 0;
-          let cnt = 0;
-          for (const f of feats) {
-            const c = featureCenter(f);
-            if (c) {
-              sumLat += c.lat;
-              sumLng += c.lng;
-              cnt++;
-            }
-          }
-          if (cnt > 0) {
-            const icon = L.divIcon({
-              className: 'town-label-icon',
-              html: `<div>${townName}</div>`,
-              iconSize: [80, 14],
-              iconAnchor: [40, 7],
-            });
-            L.marker([sumLat / cnt, sumLng / cnt], {
-              icon,
-              interactive: false,
-              keyboard: false,
-            }).addTo(group);
-          }
-        }
-        console.log(`${wardName}: ${wardFeatures.length}丁目 / ${byTown.size}町 表示`);
+        // ラベルは現在のモード (町 / 丁目) に応じて renderChomeLabels で描画
+        detailWardFeaturesRef.current = wardFeatures;
+        renderChomeLabels();
+        console.log(`${wardName}: ${wardFeatures.length}丁目 表示`);
       } catch (err) {
         console.warn('chome load failed', err);
         setError('町丁目データ読み込みに失敗: ' + (err as Error).message);
@@ -404,6 +445,7 @@ export default function CoursesMapPage() {
       // 自身の selectedOverlay は chome 塗りで重複表現するので除去
       if (selectedOverlayRef.current) mapRef.current.removeLayer(selectedOverlayRef.current);
       if (detailLayerRef.current) mapRef.current.removeLayer(detailLayerRef.current);
+      chomeLabelLayerRef.current = null;
       townLayersRef.current.clear();
       renderOtherCoursesRef.current();
 
@@ -438,6 +480,8 @@ export default function CoursesMapPage() {
         mapRef.current.removeLayer(detailLayerRef.current);
         detailLayerRef.current = null;
       }
+      chomeLabelLayerRef.current = null;
+      detailWardFeaturesRef.current = [];
       townLayersRef.current.clear();
       if (wardsLayerRef.current) wardsLayerRef.current.addTo(mapRef.current);
       if (wardLabelsRef.current) wardLabelsRef.current.addTo(mapRef.current);
@@ -955,6 +999,20 @@ export default function CoursesMapPage() {
                 title="ONでクリック時に1丁目のみ選択。OFFで町全体(全丁目)を一括選択"
               >
                 {chomeClickMode ? '丁目 (ON)' : '丁目'}
+              </button>
+            )}
+            {detailWardName && (
+              <button
+                style={{
+                  ...btn,
+                  background: chomeLabelMode ? '#0f766e' : btn.background,
+                  color: chomeLabelMode ? '#fff' : btn.color,
+                  borderColor: chomeLabelMode ? '#0f766e' : btn.borderColor,
+                }}
+                onClick={() => setChomeLabelMode((v) => !v)}
+                title="ONで「沢井1丁目」のように丁目名を表示。OFFで町名のみ表示"
+              >
+                {chomeLabelMode ? '🏷 丁目ラベル (ON)' : '🏷 丁目ラベル'}
               </button>
             )}
             <button
