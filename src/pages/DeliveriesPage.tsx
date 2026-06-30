@@ -24,6 +24,18 @@ interface DeliveryRow {
   amount: number;
 }
 
+function defaultCycle(): { from: string; to: string } {
+  // 前月21日〜当月20日 (アスクル締め)
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth() - 1, 21);
+  const to = new Date(now.getFullYear(), now.getMonth(), 20);
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { from: fmt(from), to: fmt(to) };
+}
+
+const PAGE_SIZE = 500; // 一度に描画する件数 (全件23000+を一括描画するとブラウザがクラッシュするため)
+
 export default function DeliveriesPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
@@ -36,12 +48,14 @@ export default function DeliveriesPage() {
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
   const [appendOpen, setAppendOpen] = useState(false);
 
-  // フィルタ
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  // フィルタ (初期は当月締め期間に絞る＝開いた瞬間に全件描画してクラッシュするのを防ぐ)
+  const initCycle = defaultCycle();
+  const [dateFrom, setDateFrom] = useState(initCycle.from);
+  const [dateTo, setDateTo] = useState(initCycle.to);
   const [driverQuery, setDriverQuery] = useState('');
   const [shipperQuery, setShipperQuery] = useState('');
   const [sizeQuery, setSizeQuery] = useState('');
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE); // 描画件数 (「さらに表示」で加算)
 
   const load = async () => {
     setLoading(true);
@@ -67,6 +81,11 @@ export default function DeliveriesPage() {
   useEffect(() => {
     load();
   }, []);
+
+  // フィルタ変更で描画件数を先頭からリセット (件数が増えて重くならないように)
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [dateFrom, dateTo, driverQuery, shipperQuery, sizeQuery]);
 
   const filtered = useMemo(() => {
     return records.filter((r) => {
@@ -222,7 +241,7 @@ export default function DeliveriesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => (
+                {filtered.slice(0, visibleCount).map((r) => (
                   <tr key={`${r.row_index}`}>
                     <td style={td}>{r.work_date}</td>
                     <td style={td}>
@@ -253,6 +272,16 @@ export default function DeliveriesPage() {
                 ))}
               </tbody>
             </table>
+            {filtered.length > visibleCount && (
+              <div style={{ textAlign: 'center', padding: 14 }}>
+                <button style={btnPrimary} onClick={() => setVisibleCount((c) => c + 1000)}>
+                  ▼ さらに表示（{visibleCount.toLocaleString()} / {filtered.length.toLocaleString()}件）
+                </button>
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+                  ※ 全件は重いため分割表示しています。期間・ドライバー・荷主で絞ると軽くなります（合計は絞り込み全件で計算）。
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
