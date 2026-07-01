@@ -733,6 +733,8 @@ export default function ClosingPage() {
           profiles={profiles}
           offices={offices}
           onClose={() => setBulkMode(null)}
+          onFinalize={finalizePaymentStatements}
+          finalizing={finalizing}
         />
       )}
     </div>
@@ -1264,6 +1266,8 @@ function BulkDocumentsView({
   profiles,
   offices,
   onClose,
+  onFinalize,
+  finalizing,
 }: {
   mode: 'invoice' | 'payment';
   aggregates: DriverAggregate[];
@@ -1272,6 +1276,8 @@ function BulkDocumentsView({
   profiles: Profile[];
   offices: Office[];
   onClose: () => void;
+  onFinalize?: () => void | Promise<void>;
+  finalizing?: boolean;
 }) {
   const toDate = new Date(to);
   const reiwaYear = toDate.getFullYear() - 2018;
@@ -1393,6 +1399,16 @@ function BulkDocumentsView({
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {progress && (
             <span style={{ fontSize: 12, color: '#2563eb' }}>{progress}</span>
+          )}
+          {mode === 'payment' && onFinalize && (
+            <button
+              style={{ ...btnPrimary, background: '#16a34a', borderColor: '#16a34a' }}
+              onClick={() => onFinalize()}
+              disabled={generating || finalizing}
+              title="この支払明細を確定保存し、各ドライバー/法人オーナーの閲覧・会計への反映を有効にします"
+            >
+              {finalizing ? '確定中...' : '✔ 支払明細書を確定'}
+            </button>
           )}
           <button style={btnPrimary} onClick={downloadMergedPdf} disabled={generating}>
             {generating ? '生成中...' : `1つのPDFにまとめる (${aggregates.length}ページ)`}
