@@ -396,6 +396,45 @@ export default function DriversPage() {
         <div style={{ color: '#dc2626', marginBottom: 12, whiteSpace: 'pre-wrap' }}>{error}</div>
       )}
 
+      {/* 初回ログイン待ちリスト(構想⑥)。仮パスのまま未ログインの人。本人が初回PW変更で自動的に消える。
+          askulは平文パスワードを保存しない設計なのでPWは表示しない。忘れたら「編集」から再発行。 */}
+      {!loading && drivers.filter((r) => r.must_change_password).length > 0 && (
+        <div style={{ ...card, marginBottom: 16, borderLeft: '4px solid #f59e0b' }}>
+          <h2 style={sectionTitle}>
+            🔑 初回ログイン待ち ({drivers.filter((r) => r.must_change_password).length}人)
+          </h2>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+            仮パスワードのまま、まだ初回ログイン（パスワード変更）をしていないドライバーです。ログインID（メール）を本人に伝えてください。本人が初回ログインでパスワードを変更すると、この一覧から自動で消えます。パスワードを忘れた場合は「編集」から再発行できます。
+          </div>
+          <table style={table}>
+            <thead>
+              <tr>
+                <th style={th}>氏名</th>
+                <th style={th}>ログインID</th>
+                <th style={th}>営業所</th>
+                <th style={{ ...th, width: 120 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {drivers
+                .filter((r) => r.must_change_password)
+                .map((p) => (
+                  <tr key={p.id}>
+                    <td style={td}>{p.full_name || '(未設定)'}</td>
+                    <td style={{ ...td, color: '#6b7280' }}>{emails[p.id] ?? '—'}</td>
+                    <td style={td}>{officeName(p.office_id)}</td>
+                    <td style={td}>
+                      <button style={btn} onClick={() => startEdit(p)}>
+                        編集
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div style={card}>
         <h2 style={sectionTitle}>ドライバー ({drivers.length}人)</h2>
         {loading ? (
