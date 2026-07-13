@@ -4,8 +4,8 @@ export type BusinessType = 'sole_proprietor' | 'corporation' | 'corporation_owne
 
 export const businessTypeLabels: Record<BusinessType, string> = {
   sole_proprietor: '個人事業主',
-  corporation: '法人',
-  corporation_owner: '法人オーナー',
+  corporation: '法人・屋号有',
+  corporation_owner: '法人・屋号有オーナー',
   employee: '社員',
 };
 

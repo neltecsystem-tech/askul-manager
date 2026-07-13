@@ -557,8 +557,8 @@ export default function DriversPage() {
                 >
                   <option value="">(未選択)</option>
                   <option value="sole_proprietor">個人事業主</option>
-                  <option value="corporation">法人</option>
-                  <option value="corporation_owner">法人オーナー</option>
+                  <option value="corporation">法人・屋号有</option>
+                  <option value="corporation_owner">法人・屋号有オーナー</option>
                   <option value="employee">社員</option>
                 </select>
               </label>
@@ -724,8 +724,8 @@ export default function DriversPage() {
                 >
                   <option value="">(未選択)</option>
                   <option value="sole_proprietor">個人事業主</option>
-                  <option value="corporation">法人</option>
-                  <option value="corporation_owner">法人オーナー</option>
+                  <option value="corporation">法人・屋号有</option>
+                  <option value="corporation_owner">法人・屋号有オーナー</option>
                   <option value="employee">社員</option>
                 </select>
               </label>
