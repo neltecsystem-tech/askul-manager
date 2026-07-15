@@ -491,6 +491,36 @@ export default function ClosingPage() {
         });
       };
 
+      // 件数明細(2枚目)を確定時に保存する。CategoryMatrixPage と同じ集計(日付×単価の数量)。
+      // 支払通知書(会計)の別紙で再利用するため、単価・ラベル・日別件数・合計をJSONで残す。
+      const buildCategoryMatrix = (agg: DriverAggregate) => {
+        const dates: Date[] = [];
+        const cur = new Date(dateFrom);
+        const end = new Date(dateTo);
+        while (cur <= end) {
+          dates.push(new Date(cur));
+          cur.setDate(cur.getDate() + 1);
+        }
+        const priceSet = new Set<number>();
+        for (const r of agg.rows) priceSet.add(r.unit_price);
+        const prices = Array.from(priceSet).sort((a, b) => a - b);
+        const rows = dates.map((d) => {
+          const ds = fmtDate(d);
+          const counts: Record<string, number> = {};
+          for (const p of prices) counts[p] = 0;
+          for (const r of agg.rows) {
+            if (r.work_date === ds) counts[r.unit_price] = (counts[r.unit_price] ?? 0) + (r.quantity || 0);
+          }
+          return { date: ds, dow: d.getDay(), counts };
+        });
+        const totals: Record<string, number> = {};
+        for (const p of prices) totals[p] = rows.reduce((s, r) => s + (r.counts[p] ?? 0), 0);
+        const applied_total = prices.reduce((s, p) => s + (totals[p] ?? 0) * p, 0);
+        const labels: Record<string, string> = {};
+        for (const p of prices) labels[p] = PRICE_CATEGORY_NAMES[p] ?? `¥${p}区分`;
+        return { prices, labels, rows, totals, applied_total };
+      };
+
       const rows = eligible.map((agg) => {
         const daily = buildDailyRows(agg);
         const kodate_total = daily.reduce((s, r) => s + r.kodate, 0);
@@ -509,7 +539,7 @@ export default function ClosingPage() {
           deduction_amount: agg.deduction_amount,
           payment_amount: revenue - agg.deduction_amount,
           daily_rows: daily,
-          category_matrix: null,
+          category_matrix: buildCategoryMatrix(agg),
           driver_snapshot: profile
             ? {
                 full_name: profile.full_name,
