@@ -16,6 +16,7 @@ interface Payload {
   company?: string;
   year_month?: string;
   auth_token?: string;
+  list_all?: boolean; // 管理者限定: 当月の全支払明細を返す(明細ビューアの取引先一覧用)
 }
 
 function normalizePhone(s: string): string {
@@ -78,12 +79,14 @@ Deno.serve(async (req: Request) => {
     const nameInput = (body.name ?? '').trim();
     const companyInput = (body.company ?? '').trim();
     const ym = (body.year_month ?? '').trim();
-    if (!phoneInput && !nameInput && !companyInput) return json({ error: 'phone, name or company required' }, 400);
+    const listAll = body.list_all === true || (body.list_all as unknown) === 'true';
+    if (!phoneInput && !nameInput && !companyInput && !listAll) return json({ error: 'phone, name or company required' }, 400);
     if (!/^\d{4}-\d{2}$/.test(ym)) return json({ error: 'year_month required (YYYY-MM)' }, 400);
 
     const caller = await authorizeCaller(body.auth_token);
     if (!caller) return json({ error: 'auth required', code: 'AUTH_REQUIRED' }, 401);
     const isAdmin = caller.role === 'admin' || caller.role === 'super_admin';
+    if (listAll && !isAdmin) return json({ error: 'forbidden (list_all is admin only)', code: 'FORBIDDEN' }, 403);
     // 法人=会社名で照合 / 個人=氏名 or 電話。氏名・会社名照合は管理者限定。
     const byCompany = !phoneInput && !nameInput && !!companyInput;
     const byName = !phoneInput && !!nameInput && !companyInput;
@@ -106,6 +109,35 @@ Deno.serve(async (req: Request) => {
       .from('profiles')
       .select('id, full_name, phone, business_type, company_name, office_id');
     if (pErr) return json({ error: 'profiles fetch failed: ' + pErr.message }, 500);
+
+    if (listAll) {
+      // 取引先一覧: 当月の全確定明細を返す(管理者のみ)。個人の横断マージ用に profiles から phone を補完。
+      const { data: stmts, error: sErr } = await admin
+        .from('closed_payment_statements')
+        .select('*')
+        .eq('year', year)
+        .eq('month', month);
+      if (sErr) return json({ error: 'statements fetch failed: ' + sErr.message }, 500);
+      const phoneById = new Map((profiles ?? []).map((p: any) => [p.id, p.phone]));
+      const rows = (stmts ?? []).map((s: any) => ({
+        driver_id: s.driver_id,
+        driver_name: s.driver_snapshot?.full_name ?? '',
+        phone: phoneById.get(s.driver_id) ?? null,
+        company_name: s.driver_snapshot?.company_name ?? null,
+        business_type: s.driver_snapshot?.business_type ?? null,
+        revenue: s.revenue,
+        kodate_total: s.kodate_total,
+        vehicle_total: s.vehicle_total,
+        deduction_rate: s.deduction_rate,
+        deduction_amount: s.deduction_amount,
+        payment_amount: s.payment_amount,
+        daily_rows: s.daily_rows,
+        category_matrix: s.category_matrix ?? null,
+        finalized_at: s.finalized_at,
+        modified_at: s.modified_at,
+      }));
+      return json({ source: 'askul', found: rows.length > 0, year, month, statements: rows });
+    }
 
     const nkey = nmKey(nameInput);
     const ckey = nmKey(companyInput);
