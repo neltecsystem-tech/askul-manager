@@ -123,6 +123,19 @@ export default function DriversPage() {
       setError('氏名/ID/パスワードは必須です');
       return;
     }
+    // 新規登録は 中央人材マスタの統合キー(電話)+区分(所属) を確実に取る(既存編集は素通り=特殊処理)
+    if (!creating.phone.trim()) {
+      setError('電話番号は必須です（中央人材マスタの統合キーになります）');
+      return;
+    }
+    if (!creating.business_type) {
+      setError('区分（個人/法人/社員）を選択してください');
+      return;
+    }
+    if ((creating.business_type === 'corporation' || creating.business_type === 'corporation_owner') && !creating.company_name.trim()) {
+      setError('「法人・屋号有」の場合は 会社名/屋号(所属) が必須です');
+      return;
+    }
     setBusy(true);
     const { data, error } = await supabase.functions.invoke('create-driver', {
       body: {
