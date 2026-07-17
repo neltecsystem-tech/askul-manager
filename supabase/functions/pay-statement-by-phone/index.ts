@@ -111,14 +111,13 @@ Deno.serve(async (req: Request) => {
     if (pErr) return json({ error: 'profiles fetch failed: ' + pErr.message }, 500);
 
     if (listAll) {
-      // 取引先一覧: 当月の「反映済み」(reflected_at セット済)確定明細のみ返す(管理者のみ)。
-      // 確定〜反映の管理者レビュー窓の間はビューアに出さない(反映cronがreflected_atセット後に解禁)。
+      // 取引先一覧: 当月の確定明細(closed_payment_statements)を管理者へ返す。
+      // ※ reflected_at ゲートは撤廃(2026-07): 確定済みなら即ビューア表示(会計はシート取込が正=別管理)。
       const { data: stmts, error: sErr } = await admin
         .from('closed_payment_statements')
         .select('*')
         .eq('year', year)
-        .eq('month', month)
-        .not('reflected_at', 'is', null);
+        .eq('month', month);
       if (sErr) return json({ error: 'statements fetch failed: ' + sErr.message }, 500);
       const phoneById = new Map((profiles ?? []).map((p: any) => [p.id, p.phone]));
       const rows = (stmts ?? []).map((s: any) => ({
