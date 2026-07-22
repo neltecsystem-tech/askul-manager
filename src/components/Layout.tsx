@@ -37,7 +37,6 @@ const SETTINGS_KEYS = new Set([
 const DEFAULT_ITEMS: { key: string; label: string; fallbackAdmin: boolean; fallbackDriver: boolean }[] = [
   { key: 'dashboard', label: 'ダッシュボード', fallbackAdmin: true, fallbackDriver: true },
   { key: 'shifts', label: 'シフト', fallbackAdmin: true, fallbackDriver: true },
-  { key: 'work-records', label: '稼働登録', fallbackAdmin: true, fallbackDriver: true },
   { key: 'incidents', label: '不具合登録', fallbackAdmin: true, fallbackDriver: true },
   { key: 'incident-analytics', label: '不具合分析', fallbackAdmin: true, fallbackDriver: false },
   { key: 'quality-report', label: '品質実績', fallbackAdmin: true, fallbackDriver: false },
@@ -50,6 +49,7 @@ const DEFAULT_ITEMS: { key: string; label: string; fallbackAdmin: boolean; fallb
   { key: 'swap-delivery', label: 'データ付け替え', fallbackAdmin: true, fallbackDriver: false },
   { key: 'closing', label: '月次締め/請求', fallbackAdmin: true, fallbackDriver: false },
   { key: 'payment-statements', label: '支払明細書', fallbackAdmin: true, fallbackDriver: true },
+  { key: 'work-records', label: '稼働メモ', fallbackAdmin: true, fallbackDriver: true },
   { key: 'manual', label: '📖 マニュアル', fallbackAdmin: true, fallbackDriver: true },
 ];
 

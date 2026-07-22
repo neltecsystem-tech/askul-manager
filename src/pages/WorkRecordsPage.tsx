@@ -170,13 +170,28 @@ export default function WorkRecordsPage() {
   return (
     <div>
       <PageHeader
-        title="稼働登録"
+        title="稼働登録（メモ）"
         actions={
           <button style={btn} onClick={loadMonth} disabled={loading}>
             {loading ? '読込中...' : '再読込'}
           </button>
         }
       />
+
+      <div
+        style={{
+          background: '#F1F5F9',
+          border: '1px solid #CBD5E1',
+          borderRadius: 8,
+          padding: '10px 12px',
+          marginBottom: 12,
+          fontSize: 13,
+          color: '#475569',
+          lineHeight: 1.7,
+        }}
+      >
+        📝 この稼働登録は<b>メモ用</b>です。<b>お支払い・請求の金額には使われません</b>（お支払いは配送実績データをもとに自動計算されます）。ここに表示される合計金額は参考値です。
+      </div>
 
       {error && (
         <div style={{ color: '#dc2626', marginBottom: 12, whiteSpace: 'pre-wrap' }}>
