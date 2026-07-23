@@ -93,14 +93,16 @@ Deno.serve(async (req: Request) => {
     // 氏名照合=管理者のみ。会社集計=管理者 or 自社オーナー/担当者(自社=会社名一致のみ)。
     if (byName && !isAdmin) return json({ error: 'forbidden (name lookup is admin only)', code: 'FORBIDDEN' }, 403);
     if (byCompany && !isAdmin) {
-      let callerCompany = caller.company || '';
       let isOwnerOrContact = !!caller.is_company_owner;
+      const companies: string[] = [];
+      if (caller.company) companies.push(caller.company);
       if (caller.phone) {
         const { data: sm } = await caller.nx.from('staff_master').select('company_name, is_company_owner, is_company_contact').eq('phone', caller.phone).maybeSingle();
-        if (sm) { if (!callerCompany) callerCompany = String((sm as any).company_name || ''); if ((sm as any).is_company_owner || (sm as any).is_company_contact) isOwnerOrContact = true; }
+        if (sm) { if ((sm as any).company_name) companies.push(String((sm as any).company_name)); if ((sm as any).is_company_owner || (sm as any).is_company_contact) isOwnerOrContact = true; }
       }
       const cKey = nmKey(companyInput);
-      if (!(isOwnerOrContact && callerCompany && cKey && nmKey(callerCompany) === cKey))
+      const companyMatch = !!cKey && companies.some((c) => nmKey(c) === cKey);
+      if (!(isOwnerOrContact && companyMatch))
         return json({ error: 'forbidden (自社の会社集計のみ閲覧できます)', code: 'FORBIDDEN' }, 403);
     }
     if (!isAdmin && !byName && !byCompany) {
