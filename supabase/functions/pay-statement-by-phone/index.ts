@@ -42,6 +42,15 @@ function nmKey(s: string): string {
   return out;
 }
 
+// 会社名キー: nmKey に加えて法人格(株式会社/㈱/(株)等)と記号(・/中点/ハイフン/括弧)を除去し、
+// ツール間の会社名表記ゆれ(半角㈱ vs 全角株式会社 等)を吸収する。会社名照合はこれで統一。
+function coKey(s: string): string {
+  return nmKey(s)
+    .replace(/株式会社|有限会社|合同会社|合資会社|\(株\)|\(有\)|\(合\)|㈱|㈲/g, '')
+    .replace(/[\s　・,，.。\-—–ー'"`（）()]/g, '')
+    .toLowerCase();
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
@@ -100,8 +109,8 @@ Deno.serve(async (req: Request) => {
         const { data: sm } = await caller.nx.from('staff_master').select('company_name, is_company_owner, is_company_contact').eq('phone', caller.phone).maybeSingle();
         if (sm) { if ((sm as any).company_name) companies.push(String((sm as any).company_name)); if ((sm as any).is_company_owner || (sm as any).is_company_contact) isOwnerOrContact = true; }
       }
-      const cKey = nmKey(companyInput);
-      const companyMatch = !!cKey && companies.some((c) => nmKey(c) === cKey);
+      const cKey = coKey(companyInput);
+      const companyMatch = !!cKey && companies.some((c) => coKey(c) === cKey);
       if (!(isOwnerOrContact && companyMatch))
         return json({ error: 'forbidden (自社の会社集計のみ閲覧できます)', code: 'FORBIDDEN' }, 403);
     }
@@ -155,9 +164,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const nkey = nmKey(nameInput);
-    const ckey = nmKey(companyInput);
+    const ckey = coKey(companyInput);
     const matched = byCompany
-      ? (profiles ?? []).filter((p) => ckey && nmKey(String(p.company_name ?? '')).includes(ckey))
+      ? (profiles ?? []).filter((p) => ckey && coKey(String(p.company_name ?? '')).includes(ckey))
       : byName
       ? (profiles ?? []).filter((p) => nmKey(String(p.full_name ?? '')) === nkey)
       : (profiles ?? []).filter((p) => normalizePhone(String(p.phone ?? '')) === phoneInput);

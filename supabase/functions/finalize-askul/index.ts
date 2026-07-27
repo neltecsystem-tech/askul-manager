@@ -64,6 +64,20 @@ function cycleFromClosing(y: number, m: number): { from: string; to: string } {
   return { from: fmtDate(new Date(y, m - 2, 21)), to: fmtDate(new Date(y, m - 1, 20)) };
 }
 
+// NexPort管理者JWT(ビューアの「変更を反映」ボタン用)を cross-project で検証。
+async function isNexportAdmin(authToken: string): Promise<boolean> {
+  try {
+    const url = Deno.env.get('NEXPORT_SUPABASE_URL') || '';
+    const key = Deno.env.get('NEXPORT_SERVICE_ROLE_KEY') || '';
+    if (!authToken || !url || !key) return false;
+    const nx = createClient(url, key);
+    const { data: { user } } = await nx.auth.getUser(authToken);
+    if (!user) return false;
+    const { data: prof } = await nx.from('profiles').select('role').eq('id', user.id).maybeSingle();
+    return prof?.role === 'admin' || prof?.role === 'super_admin';
+  } catch { return false; }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   try {
@@ -79,6 +93,8 @@ Deno.serve(async (req) => {
       const { data: cs } = await admin.from('automation_config').select('value').eq('key', 'cron_secret').maybeSingle();
       authorized = !!(cs?.value && cs.value === String(body.cron_secret));
     }
+    // NexPort管理者JWT(ビューアの「変更を反映」ボタン)でも書込を許可
+    if (!authorized && body.auth_token) authorized = await isNexportAdmin(String(body.auth_token));
     if (!dryRun && !authorized) return json({ error: '書込(確定/反映)は権限がありません。cron/管理者のみ。', code: 'FORBIDDEN' }, 403);
 
     if (!/^\d{4}-\d{2}$/.test(String(body.year_month ?? ''))) return json({ error: 'year_month (締め当月 YYYY-MM) が必要です' }, 400);
@@ -268,9 +284,10 @@ Deno.serve(async (req) => {
       return json({ ok: true, dry_run: true, year, month, period: { from: dateFrom, to: dateTo }, count: results.length, grand, drivers: summary, unregistered, alert: alertResult });
     }
 
-    // 反映済みロック + upsert
+    // 反映済みロック + upsert。force=true(変更を反映ボタン)は反映済みでも上書き再確定。
+    const force = body.force === true;
     const { data: existing } = await admin.from('closed_payment_statements').select('driver_id, reflected_at').eq('year', year).eq('month', month);
-    const lockedIds = new Set((existing ?? []).filter((r: any) => r.reflected_at).map((r: any) => r.driver_id));
+    const lockedIds = force ? new Set<any>() : new Set((existing ?? []).filter((r: any) => r.reflected_at).map((r: any) => r.driver_id));
     const payload = results.filter((r) => !lockedIds.has(r.driver_id)).map((r) => ({
       driver_id: r.driver_id, year, month, revenue: r.revenue, kodate_total: r.kodate_total, vehicle_total: r.vehicle_total,
       deduction_rate: r.deduction_rate, deduction_amount: r.deduction_amount, payment_amount: r.payment_amount,

@@ -89,10 +89,13 @@ Deno.serve(async (req: Request) => {
     const getUrl =
       `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/` +
       encodeURIComponent(`${SHEET_NAME}!A:A`);
-    const getRes = await fetch(getUrl, {
+    const getRes = await fetchWithRetry(getUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!getRes.ok) {
+      if (getRes.status === 429 || getRes.status === 503) {
+        return json({ error: 'ただいまアクセスが混み合っています。しばらくしてから、もう一度お試しください。' }, 503);
+      }
       return json({ error: `末尾検出失敗 ${getRes.status}: ${await getRes.text()}` }, 502);
     }
     const getData = (await getRes.json()) as { values?: string[][] };
@@ -110,7 +113,7 @@ Deno.serve(async (req: Request) => {
       encodeURIComponent(updateRange) +
       '?valueInputOption=USER_ENTERED';
 
-    const updateRes = await fetch(updateUrl, {
+    const updateRes = await fetchWithRetry(updateUrl, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -119,6 +122,9 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({ values: [row] }),
     });
     if (!updateRes.ok) {
+      if (updateRes.status === 429 || updateRes.status === 503) {
+        return json({ error: 'ただいまアクセスが混み合っています。しばらくしてから、もう一度お試しください。' }, 503);
+      }
       const text = await updateRes.text();
       return json({ error: `Sheets API update エラー ${updateRes.status}: ${text}` }, 502);
     }
@@ -133,6 +139,21 @@ Deno.serve(async (req: Request) => {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
 });
+
+// Sheets API のレート制限 (429 RESOURCE_EXHAUSTED) や 503 は一時的なので指数バックオフでリトライ
+async function fetchWithRetry(url: string, init: RequestInit, maxRetries = 4): Promise<Response> {
+  let res: Response | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    res = await fetch(url, init);
+    if (res.status !== 429 && res.status !== 503) return res;
+    if (attempt === maxRetries) return res;
+    await res.body?.cancel();
+    // 1s, 2s, 4s, 8s (+ジッター) 待って再試行
+    const delay = 1000 * Math.pow(2, attempt) + Math.floor(Math.random() * 500);
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  return res!;
+}
 
 async function getAccessToken(clientEmail: string, privateKeyPem: string, scope: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000);

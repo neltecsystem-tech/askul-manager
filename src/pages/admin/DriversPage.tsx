@@ -88,6 +88,7 @@ export default function DriversPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
+  const [accCompanies, setAccCompanies] = useState<string[]>([]); // 会計マスタの会社正式名称(会社名プルダウン用)
 
   const load = async () => {
     setLoading(true);
@@ -111,7 +112,23 @@ export default function DriversPage() {
 
   useEffect(() => {
     load();
+    // 会計マスタ(acc_invoice_partners)の会社正式名称リストを取得(会社名は正式名称から選択させる)
+    fetch('https://nccognptoprhwsbjnwcu.supabase.co/functions/v1/list-invoice-companies', {
+      headers: { Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jY29nbnB0b3ByaHdzYmpud2N1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNDU0NDEsImV4cCI6MjA4OTkyMTQ0MX0.M3h31uPyKYWlNevVW3OvZOonoTidC1KLZ04sB5nRKzU' },
+    })
+      .then((r) => r.json())
+      .then((d) => setAccCompanies(((d?.companies ?? []) as { name: string }[]).map((c) => String(c.name || '')).filter(Boolean)))
+      .catch(() => {});
   }, []);
+
+  // 会社名プルダウン(会計マスタ正式名称)。全フォーム共通の datalist。
+  const accCompaniesDatalist = (
+    <datalist id="acc-companies">
+      {accCompanies.map((n) => (
+        <option key={n} value={n} />
+      ))}
+    </datalist>
+  );
 
   const officeName = (id: string | null) =>
     id ? offices.find((o) => o.id === id)?.name ?? '(不明)' : '—';
@@ -577,13 +594,15 @@ export default function DriversPage() {
               </label>
               {(creating.business_type === 'corporation' || creating.business_type === 'corporation_owner') && (
                 <label style={labelStyle}>
-                  所属会社名
+                  所属会社名（会計マスタから選択）
                   <input
                     style={input}
+                    list="acc-companies"
                     value={creating.company_name}
                     onChange={(e) => setCreating({ ...creating, company_name: e.target.value })}
-                    placeholder="例: 株式会社○○"
+                    placeholder="クリックで候補表示（正式名称を選択）"
                   />
+                  {accCompaniesDatalist}
                 </label>
               )}
               {creating.business_type === 'employee' && (
@@ -744,13 +763,15 @@ export default function DriversPage() {
               </label>
               {(editing.business_type === 'corporation' || editing.business_type === 'corporation_owner') && (
                 <label style={labelStyle}>
-                  所属会社名
+                  所属会社名（会計マスタから選択）
                   <input
                     style={input}
+                    list="acc-companies"
                     value={editing.company_name}
                     onChange={(e) => setEditing({ ...editing, company_name: e.target.value })}
-                    placeholder="例: 株式会社○○"
+                    placeholder="クリックで候補表示（正式名称を選択）"
                   />
+                  {accCompaniesDatalist}
                 </label>
               )}
               {editing.business_type === 'employee' && (
