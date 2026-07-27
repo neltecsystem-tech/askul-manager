@@ -39,6 +39,20 @@ export default function ChangePasswordPage() {
       .from('profiles')
       .update({ must_change_password: false })
       .eq('id', profile.id);
+    // 逆同期: NexPort+askul+delivery へ新パスワードを反映して資格情報を統一(新聞SSOも追随)。失敗しても続行。
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const at = sess?.session?.access_token;
+      if (at) {
+        const NEXPORT = 'https://nccognptoprhwsbjnwcu.supabase.co';
+        const NEXPORT_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jY29nbnB0b3ByaHdzYmpud2N1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNDU0NDEsImV4cCI6MjA4OTkyMTQ0MX0.M3h31uPyKYWlNevVW3OvZOonoTidC1KLZ04sB5nRKzU';
+        await fetch(NEXPORT + '/functions/v1/sync-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': NEXPORT_ANON, 'Authorization': 'Bearer ' + NEXPORT_ANON },
+          body: JSON.stringify({ source: 'askul', access_token: at, new_password: pw1 }),
+        });
+      }
+    } catch (_) { /* 逆同期の失敗はブロックしない */ }
     setSaving(false);
     if (profileErr) {
       setError('フラグ更新失敗: ' + profileErr.message);
