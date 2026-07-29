@@ -8,7 +8,6 @@ import { useAuth } from '../lib/AuthContext';
 import PageHeader from '../components/PageHeader';
 import PaymentStatementDocument from '../components/PaymentStatementDocument';
 import SummaryStatementDocument from '../components/SummaryStatementDocument';
-import EditStatementModal from '../components/EditStatementModal';
 import { btn, btnPrimary, card, colors, input, table, td, th } from '../lib/ui';
 import type { ClosedPaymentStatement } from '../types/db';
 
@@ -43,7 +42,6 @@ export default function PaymentStatementsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedYearMonth, setSelectedYearMonth] = useState<string>('');
   const [openStatement, setOpenStatement] = useState<ClosedPaymentStatement | null>(null);
-  const [editingStatement, setEditingStatement] = useState<ClosedPaymentStatement | null>(null);
   const [bulkBusy, setBulkBusy] = useState<string | null>(null);
 
   const summaryDocRef = useRef<HTMLDivElement>(null);
@@ -292,14 +290,6 @@ export default function PaymentStatementsPage() {
                       <button style={btn} onClick={() => setOpenStatement(s)}>
                         明細を見る
                       </button>
-                      {isAdmin && (
-                        <button
-                          style={{ ...btn, marginLeft: 4 }}
-                          onClick={() => setEditingStatement(s)}
-                        >
-                          編集
-                        </button>
-                      )}
                     </td>
                   </tr>
                 ))}
@@ -314,14 +304,6 @@ export default function PaymentStatementsPage() {
           statement={openStatement}
           hideAmounts={hideAmounts}
           onClose={() => setOpenStatement(null)}
-        />
-      )}
-
-      {editingStatement && (
-        <EditStatementModal
-          statement={editingStatement}
-          onClose={() => setEditingStatement(null)}
-          onSaved={load}
         />
       )}
 
