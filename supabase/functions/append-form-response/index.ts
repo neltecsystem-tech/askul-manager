@@ -41,8 +41,10 @@ Deno.serve(async (req: Request) => {
       amount?: number | string;
       reason?: string;
       inputter?: string;
+      force?: boolean;
     };
 
+    const force = body.force === true;
     const event_date = (body.event_date || '').trim();
     const driver_name = (body.driver_name || '').trim();
     const type = (body.type || '').trim();
@@ -85,10 +87,10 @@ Deno.serve(async (req: Request) => {
     // append は使わない (Forms連携シートで末尾検出が不安定で同じ行に上書きされ続けるため)
     // 代わりに: A列全件読み取り → 末尾の非空行を明示計算 → values.update で その行に書き込み
 
-    // 1. A 列全体を取得して 末尾の非空行を計算
+    // 1. A:G 全体を取得して 末尾の非空行を計算 + 重複チェック
     const getUrl =
       `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/` +
-      encodeURIComponent(`${SHEET_NAME}!A:A`);
+      encodeURIComponent(`${SHEET_NAME}!A:G`);
     const getRes = await fetchWithRetry(getUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -99,12 +101,25 @@ Deno.serve(async (req: Request) => {
       return json({ error: `末尾検出失敗 ${getRes.status}: ${await getRes.text()}` }, 502);
     }
     const getData = (await getRes.json()) as { values?: string[][] };
-    const aColumn = getData.values ?? [];
+    const rows = getData.values ?? [];
     let lastNonEmpty = 0;
-    aColumn.forEach((r, i) => {
+    rows.forEach((r, i) => {
       if (r && r[0]) lastNonEmpty = i + 1;
     });
     const targetRow = lastNonEmpty + 1;
+
+    // 同じ日付 かつ 同じ氏名 の重複を拒否 (force=true で上書き回避せず登録可)
+    if (!force) {
+      const dup = rows.slice(1).some(
+        (r) => normDate(r?.[1] ?? '') === normDate(formattedDate) && (r?.[2] ?? '').trim() === driver_name,
+      );
+      if (dup) {
+        return json({
+          error: `同じ日付・氏名の登録が既にあります (${formattedDate} / ${driver_name})`,
+          duplicate: true,
+        }, 409);
+      }
+    }
 
     // 2. その行に直接 update で書き込み (append ではなく)
     const updateRange = `${SHEET_NAME}!A${targetRow}:G${targetRow}`;
@@ -139,6 +154,12 @@ Deno.serve(async (req: Request) => {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
 });
+
+function normDate(s: string): string {
+  const m = (s || '').replace(/-/g, '/').match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+  if (!m) return (s || '').trim();
+  return `${m[1]}/${Number(m[2])}/${Number(m[3])}`;
+}
 
 // Sheets API のレート制限 (429 RESOURCE_EXHAUSTED) や 503 は一時的なので指数バックオフでリトライ
 async function fetchWithRetry(url: string, init: RequestInit, maxRetries = 4): Promise<Response> {
