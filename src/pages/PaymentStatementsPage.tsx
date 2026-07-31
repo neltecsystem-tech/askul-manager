@@ -50,12 +50,22 @@ export default function PaymentStatementsPage() {
   const isAdmin = profile?.role === 'admin';
   const isOwner = profile?.business_type === 'corporation_owner';
   const canBulkExport = isAdmin || isOwner;
-  // 法人(corporation) / 社員(employee) は金額非表示
+  // 明細ビューアを見られない人(中央 login_access.meisai で拒否)は金額を隠す。
+  const [meisaiHide, setMeisaiHide] = useState(false);
+  useEffect(() => {
+    if (!profile?.phone || isAdmin || isOwner) { setMeisaiHide(false); return; }
+    fetch('https://nccognptoprhwsbjnwcu.supabase.co/functions/v1/check-login-access', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ system: 'meisai', phone: profile.phone, source: 'askul-money' }),
+    }).then((r) => r.json()).then((j) => setMeisaiHide(!!j && j.allowed === false)).catch(() => {});
+  }, [profile?.phone, isAdmin, isOwner]);
+  // 法人(corporation) / 社員(employee) は金額非表示 + 明細ビューア不可の人も非表示
   const hideAmounts =
-    !isAdmin &&
-    !isOwner &&
-    (profile?.business_type === 'corporation' ||
-      profile?.business_type === 'employee');
+    meisaiHide ||
+    (!isAdmin &&
+      !isOwner &&
+      (profile?.business_type === 'corporation' ||
+        profile?.business_type === 'employee'));
 
   const load = async () => {
     setLoading(true);
