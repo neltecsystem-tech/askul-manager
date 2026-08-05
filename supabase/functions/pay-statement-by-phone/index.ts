@@ -80,6 +80,24 @@ async function authorizeCaller(authToken: string | undefined): Promise<any | nul
   };
 }
 
+
+// 🔒 公開タイミング = 支払通知メールの発行に合わせる(2026-08〜)。確定しただけの明細は本人にも見せない。
+//   公開条件: ① 自分宛の支払通知が発行済み(NexPort pay_statement_acceptance.issued_at) または
+//            ② 実績月の翌月11日 9:00 JST を過ぎた(=2回目の送信cron)。
+//   ②は保険。支払0円・メール未登録・明細停止などで通知が出ない人が、いつまでも自分の明細を
+//   見られなくなるのを防ぐ。管理者(admin/super_admin)は従来どおり常に閲覧できる。
+const PUBLISH_MSG = 'この月の明細は、支払通知書の発行後に公開されます（毎月1日・11日の朝に発行）。もうしばらくお待ちください。';
+function publishOpenAt(ym: string): number {
+  const [y, m] = ym.split('-').map(Number);
+  return Date.UTC(y, m, 11, 0, 0, 0); // 翌月11日 00:00 UTC = 09:00 JST
+}
+async function noticePublished(nx: any, profileId: string, ym: string): Promise<boolean> {
+  if (Date.now() >= publishOpenAt(ym)) return true;
+  if (!profileId) return false;
+  const { data } = await nx.from('pay_statement_acceptance').select('issued_at').eq('month', ym).eq('profile_id', profileId).maybeSingle();
+  return !!(data as any)?.issued_at;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
@@ -95,6 +113,23 @@ Deno.serve(async (req: Request) => {
     const caller = await authorizeCaller(body.auth_token);
     if (!caller) return json({ error: 'auth required', code: 'AUTH_REQUIRED' }, 401);
     const isAdmin = caller.role === 'admin' || caller.role === 'super_admin';
+    // 表示対象月の制限: 統合ビューア/通知運用は2026年7月開始。それより前の月は非管理者に表示しない。
+    if (ym < '2026-07' && !isAdmin && !listAll) return json({ source: 'askul', found: false, reason: 'month_not_available', message: '2026年7月分より前は表示対象外です' });
+    // 🔒 公開は支払通知メールの発行に合わせる(確定しただけでは本人にも出さない)
+    if (!listAll && !isAdmin && !(await noticePublished(caller.nx, caller.user_id, ym)))
+      return json({ source: 'askul', found: false, reason: 'not_published', message: PUBLISH_MSG });
+    // 🔒 明細ビューア ログイン許可: NexPort recipient_access.viewer_login=false の本人は閲覧不可(管理者は除外)。
+    if (!isAdmin) {
+      // 🔒 中央 login_access(meisai) で判定(明示停止/法人配下)。会計マトリクスに一本化。
+      const chk = await fetch('https://nccognptoprhwsbjnwcu.supabase.co/functions/v1/check-login-access', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system: 'meisai', profile_id: caller.user_id, source: 'viewer-askul' }),
+      }).then((x) => x.json()).catch(() => null);
+      if (chk && chk.allowed === false) {
+        const corp = chk.reason === 'corp_sub_denied';
+        return json({ error: corp ? '法人配下の方の明細は、法人のオーナー/担当者がご確認ください。' : 'この明細ビューアのご利用は停止されています。担当者にお問い合わせください。', code: corp ? 'CORP_SUB_DENIED' : 'VIEWER_DISABLED' }, 403);
+      }
+    }
     if (listAll && !isAdmin) return json({ error: 'forbidden (list_all is admin only)', code: 'FORBIDDEN' }, 403);
     // 法人=会社名で照合 / 個人=氏名 or 電話。氏名・会社名照合は管理者限定。
     const byCompany = !phoneInput && !nameInput && !!companyInput;
@@ -105,9 +140,11 @@ Deno.serve(async (req: Request) => {
       let isOwnerOrContact = !!caller.is_company_owner;
       const companies: string[] = [];
       if (caller.company) companies.push(caller.company);
-      if (caller.phone) {
-        const { data: sm } = await caller.nx.from('staff_master').select('company_name, is_company_owner, is_company_contact').eq('phone', caller.phone).maybeSingle();
-        if (sm) { if ((sm as any).company_name) companies.push(String((sm as any).company_name)); if ((sm as any).is_company_owner || (sm as any).is_company_contact) isOwnerOrContact = true; }
+      // staff_master を 電話 or profile_id で照合(電話未登録のオーナー/担当でもアカウントで自社特定)。
+      const smOr = [caller.phone ? `phone.eq.${caller.phone}` : '', caller.user_id ? `profile_id.eq.${caller.user_id}` : ''].filter(Boolean).join(',');
+      if (smOr) {
+        const { data: sms } = await caller.nx.from('staff_master').select('company_name, is_company_owner, is_company_contact').or(smOr);
+        for (const sm of (sms ?? [])) { if ((sm as any).company_name) companies.push(String((sm as any).company_name)); if ((sm as any).is_company_owner || (sm as any).is_company_contact) isOwnerOrContact = true; }
       }
       const cKey = coKey(companyInput);
       const companyMatch = !!cKey && companies.some((c) => coKey(c) === cKey);
@@ -173,10 +210,13 @@ Deno.serve(async (req: Request) => {
     if (matched.length === 0) {
       return json({ source: 'askul', found: false, reason: byCompany ? 'company_not_found' : byName ? 'name_not_found' : 'phone_not_registered' });
     }
-    // askul 側で 'corporation' (法人配下ドライバー) と判定された場合は明細を出さない
+    // askul 側で 'corporation' (法人配下ドライバー) と判定された本人(byPhone)は明細を出さない
+    //  → 法人配下の明細はオーナー/担当が法人集計(byCompany)で確認する運用。
+    //  ※ byCompany は上で「自社オーナー/担当＋会社名一致」を検証済みなので、配下(全員corporation)でも
+    //    正当な閲覧としてブロックしない(オーナーが自分のaskul明細を持たない法人でも配下明細を表示)。
     const matchedBizTypes = matched.map((p) => p.business_type);
     const askulCorpSub = matchedBizTypes.length > 0 && matchedBizTypes.every((bt) => bt === 'corporation');
-    if (askulCorpSub && !isAdmin) {
+    if (askulCorpSub && !isAdmin && !byCompany) {
       return json({ source: 'askul', found: false, reason: 'corp_sub_no_statement', matched_profiles: matched.map((p) => ({ id: p.id, full_name: p.full_name })) });
     }
     const driverIds = matched.map((p) => p.id);
