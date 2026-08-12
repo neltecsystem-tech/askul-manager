@@ -288,11 +288,22 @@ Deno.serve(async (req) => {
     const force = body.force === true;
     const { data: existing } = await admin.from('closed_payment_statements').select('driver_id, reflected_at').eq('year', year).eq('month', month);
     const lockedIds = force ? new Set<any>() : new Set((existing ?? []).filter((r: any) => r.reflected_at).map((r: any) => r.driver_id));
+    // ★既に反映済みの行は reflected_at を引き継ぐ。
+    //   force 再確定で無条件に null にすると、公開済みの明細が明細ビューアの取引先一覧から
+    //   消える(一覧は reflected_at セット済のみ対象)。金額を直して再確定するたびに公開が
+    //   取り消され、続けて reflect が走らないと戻らない、という事故になる
+    //   (デリバリー finalize-yamato で 2026-07 の9名が消えていたのと同じ原因)。
+    //   新規に確定される行は従来どおり null で始まり、reflect まで非公開のまま。
+    const prevReflected = new Map<string, string | null>(
+      (existing ?? []).map((r: any) => [String(r.driver_id), r.reflected_at ?? null]),
+    );
+    // 既に公開済みの月に後から作られた行は、その場で公開する(次の反映まで見えないのを防ぐ)
+    const monthPublished = (existing ?? []).some((r: any) => r.reflected_at);
     const payload = results.filter((r) => !lockedIds.has(r.driver_id)).map((r) => ({
       driver_id: r.driver_id, year, month, revenue: r.revenue, kodate_total: r.kodate_total, vehicle_total: r.vehicle_total,
       deduction_rate: r.deduction_rate, deduction_amount: r.deduction_amount, payment_amount: r.payment_amount,
       daily_rows: r.daily_rows, category_matrix: r.category_matrix, driver_snapshot: r.driver_snapshot,
-      finalized_at: nowIso, reflected_at: null,
+      finalized_at: nowIso, reflected_at: prevReflected.get(String(r.driver_id)) ?? (monthPublished ? nowIso : null),
     }));
     const lockedCount = results.length - payload.length;
     if (payload.length === 0) return json({ ok: true, dry_run: false, saved: 0, locked: lockedCount, year, month, note: lockedCount ? '対象月は反映済み(ロック)' : '対象ドライバーなし', unregistered, alert: alertResult });
