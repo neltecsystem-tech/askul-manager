@@ -43,7 +43,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq('id', session.user.id)
       .maybeSingle()
       .then(({ data }) => {
-        setProfile(data as Profile | null);
+        const p = data as Profile | null;
+        // 🚨 退任・契約終了した人は profiles.active を false にして無効化する。
+        //    運用画面(シフト・稼働・締め 等)は active=true で絞っているので管理側からは
+        //    消えるが、それだけでは本人がログインできてしまい、自分の配送実績や
+        //    支払明細を見続けられる状態だった。ここで入口を塞ぐ。
+        //    ★ 削除ではなく無効化にしているのは、マスタと過去データを残すため。
+        if (p && p.active === false) {
+          setProfile(null);
+          setLoading(false);
+          supabase.auth.signOut().then(() => {
+            alert('このアカウントは現在ご利用いただけません。担当者にお問い合わせください。');
+          });
+          return;
+        }
+        setProfile(p);
         setLoading(false);
       });
   }, [session?.user?.id]);
