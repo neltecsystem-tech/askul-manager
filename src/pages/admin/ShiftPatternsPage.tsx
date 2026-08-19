@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import type { Course, Office, Profile, ShiftPattern } from '../../types/db';
 import PageHeader from '../../components/PageHeader';
 import { btn, btnPrimary, card, colors, input, table, td, th } from '../../lib/ui';
+import { sortCourses } from '../../lib/courseSort';
 
 const DOW_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 const DOW_CODES = [0, 1, 2, 3, 4, 5, 6];
@@ -41,7 +42,7 @@ export default function ShiftPatternsPage() {
     if (drvRes.error) setError(drvRes.error.message);
     else setDrivers((drvRes.data ?? []) as Profile[]);
     if (crsRes.error) setError(crsRes.error.message);
-    else setCourses((crsRes.data ?? []) as Course[]);
+    else setCourses(sortCourses((crsRes.data ?? []) as Course[]));
     if (offRes.error) setError(offRes.error.message);
     else setOffices((offRes.data ?? []) as Office[]);
     if (patRes.error) setError(patRes.error.message);

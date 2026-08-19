@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import type { Course, DayType, DayTypeDef, Office, OfficeDayCourse } from '../../types/db';
 import PageHeader from '../../components/PageHeader';
 import { btn, btnPrimary, card, colors, input, table, td, th } from '../../lib/ui';
+import { sortCourses } from '../../lib/courseSort';
 
 export default function ShiftScheduleSettingsPage() {
   const [offices, setOffices] = useState<Office[]>([]);
@@ -29,7 +30,7 @@ export default function ShiftScheduleSettingsPage() {
     if (officesRes.error) setError(officesRes.error.message);
     else setOffices((officesRes.data ?? []) as Office[]);
     if (coursesRes.error) setError(coursesRes.error.message);
-    else setCourses((coursesRes.data ?? []) as Course[]);
+    else setCourses(sortCourses((coursesRes.data ?? []) as Course[]));
     if (dtRes.error) setError(dtRes.error.message);
     else setDayTypes((dtRes.data ?? []) as DayTypeDef[]);
     if (odcRes.error) setError(odcRes.error.message);

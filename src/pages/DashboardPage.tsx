@@ -6,6 +6,7 @@ import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { Course, Incident, Office, Profile, ShiftAssignment } from '../types/db';
 import { card, colors, table, td, th } from '../lib/ui';
+import { sortCourses } from '../lib/courseSort';
 
 const COURSE_COLORS = [
   '#dc2626', '#ea580c', '#ca8a04', '#65a30d', '#059669',
@@ -80,7 +81,7 @@ export default function DashboardPage() {
       ]);
       if (asgRes.error) setError(asgRes.error.message);
       else setAssignments((asgRes.data ?? []) as ShiftAssignment[]);
-      if (!courseRes.error) setCourses((courseRes.data ?? []) as Course[]);
+      if (!courseRes.error) setCourses(sortCourses((courseRes.data ?? []) as Course[]));
       if (!drvRes.error) setDrivers((drvRes.data ?? []) as Profile[]);
       if (!offRes.error) setOffices((offRes.data ?? []) as Office[]);
       if (!incYesRes.error) setIncidentsYesterday((incYesRes.data ?? []) as Incident[]);

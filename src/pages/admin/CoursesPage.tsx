@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import type { Course, Office } from '../../types/db';
 import PageHeader from '../../components/PageHeader';
 import { btn, btnDanger, btnPrimary, card, input, table, td, th } from '../../lib/ui';
+import { sortCourses } from '../../lib/courseSort';
 
 interface Editing {
   id?: string;
@@ -34,7 +35,7 @@ export default function CoursesPage() {
       supabase.from('offices').select('*').order('sort_order').order('name'),
     ]);
     if (coursesRes.error) setError(coursesRes.error.message);
-    else setRows(coursesRes.data as Course[]);
+    else setRows(sortCourses(coursesRes.data as Course[]));
     if (officesRes.error) setError(officesRes.error.message);
     else setOffices(officesRes.data as Office[]);
     setLoading(false);

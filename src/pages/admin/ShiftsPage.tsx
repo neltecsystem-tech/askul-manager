@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/AuthContext';
 import type { Course, DayTypeDef, Office, Profile, ShiftAssignment, ShiftPattern, SpecialDate } from '../../types/db';
 import PageHeader from '../../components/PageHeader';
 import { btn, btnDanger, btnPrimary, card, colors, input, th } from '../../lib/ui';
+import { sortCourses } from '../../lib/courseSort';
 
 function fmtDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -75,7 +76,7 @@ export default function ShiftsPage() {
         .lte('work_date', to),
     ]);
     if (courseRes.error) setError(courseRes.error.message);
-    else setCourses((courseRes.data ?? []) as Course[]);
+    else setCourses(sortCourses((courseRes.data ?? []) as Course[]));
     if (shiftRes.error) setError(shiftRes.error.message);
     else setAssignments((shiftRes.data ?? []) as ShiftAssignment[]);
     setLoading(false);
