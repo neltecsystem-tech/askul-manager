@@ -88,6 +88,7 @@ export default function DriversPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
+  const [showInactive, setShowInactive] = useState(false);
   const [accCompanies, setAccCompanies] = useState<string[]>([]); // 会計マスタの会社正式名称(会社名プルダウン用)
 
   const load = async () => {
@@ -364,8 +365,30 @@ export default function DriversPage() {
       phone: (p as { phone?: string | null }).phone ?? '',
     });
 
-  const drivers = rows.filter((r) => r.role === 'driver');
-  const admins = rows.filter((r) => r.role === 'admin');
+  // 一覧には「有効」だけを出す。無効(退任・契約終了)は下部の「無効一覧」に隔離し、そこから再有効化する。
+  const drivers = rows.filter((r) => r.role === 'driver' && r.active);
+  const admins = rows.filter((r) => r.role === 'admin' && r.active);
+  const inactives = rows.filter((r) => !r.active);
+
+  const reactivate = async (p: Profile) => {
+    if (
+      !confirm(
+        `${p.full_name || '(未設定)'} を再び【有効】にします。
+` +
+          `有効にすると、シフト・稼働登録・締めの対象に戻り、本人もログインできるようになります。
+
+` +
+          `続行しますか？`,
+      )
+    )
+      return;
+    setError(null);
+    setBusy(true);
+    const { error } = await supabase.from('profiles').update({ active: true }).eq('id', p.id);
+    setBusy(false);
+    if (error) setError(error.message);
+    await load();
+  };
 
   const renderRow = (p: Profile) => (
     <tr key={p.id}>
@@ -512,6 +535,74 @@ export default function DriversPage() {
           <tbody>{admins.map(renderRow)}</tbody>
         </table>
       </div>
+
+      {/* 無効一覧(退任・契約終了)。上の一覧からは外れるが、削除ではないので過去の稼働・支払データは残る。
+          ここから再有効化できる。 */}
+      {!loading && inactives.length > 0 && (
+        <div style={{ ...card, marginTop: 16, borderLeft: '4px solid #9ca3af' }}>
+          <h2 style={{ ...sectionTitle, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button style={btn} onClick={() => setShowInactive((v) => !v)}>
+              {showInactive ? '▼' : '▶'}
+            </button>
+            無効一覧 ({inactives.length}人)
+          </h2>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+            退任・契約終了などで無効にした人です。上の一覧には表示されません。過去の稼働・支払データはそのまま残っています。復帰した場合は「有効に戻す」を押してください。
+          </div>
+          {showInactive && (
+            <table style={table}>
+              <thead>
+                <tr>
+                  <th style={th}>氏名</th>
+                  <th style={th}>ログインID</th>
+                  <th style={th}>事業形態 / 所属</th>
+                  <th style={th}>営業所</th>
+                  <th style={{ ...th, textAlign: 'right' }}>控除率（%）</th>
+                  <th style={th}>区分</th>
+                  <th style={{ ...th, width: 200 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {inactives.map((p) => (
+                  <tr key={p.id} style={{ color: '#6b7280' }}>
+                    <td style={td}>{p.full_name || '(未設定)'}</td>
+                    <td style={{ ...td, color: '#6b7280' }}>{emails[p.id] ?? '—'}</td>
+                    <td style={td}>
+                      {p.business_type ? businessTypeLabels[p.business_type] : '—'}
+                      {(p.business_type === 'corporation' || p.business_type === 'corporation_owner') &&
+                      p.company_name ? (
+                        <div style={{ fontSize: 11 }}>{p.company_name}</div>
+                      ) : null}
+                    </td>
+                    <td style={td}>{officeName(p.office_id)}</td>
+                    <td style={{ ...td, textAlign: 'right' }}>
+                      {p.deduction_rate === null ? '—' : `${p.deduction_rate}%`}
+                    </td>
+                    <td style={td}>{p.role === 'admin' ? '管理者' : 'ドライバー'}</td>
+                    <td style={td}>
+                      <button style={btnPrimary} onClick={() => reactivate(p)} disabled={busy}>
+                        有効に戻す
+                      </button>
+                      <button style={{ ...btn, marginLeft: 4 }} onClick={() => startEdit(p)}>
+                        編集
+                      </button>
+                      {p.id !== me?.id && (
+                        <button
+                          style={{ ...btnDanger, marginLeft: 4 }}
+                          onClick={() => deleteDriver(p)}
+                          disabled={busy}
+                        >
+                          削除
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {creating && (
         <div style={modal.overlay}>
