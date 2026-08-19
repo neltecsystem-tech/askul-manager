@@ -98,6 +98,21 @@ async function noticePublished(nx: any, profileId: string, ym: string): Promise<
   return !!(data as any)?.issued_at;
 }
 
+
+// 🔒 他人の明細(氏名照合/会社集計/取引先一覧/他人の電話)は「NELTEC社員の管理者」のみ。
+//    管理者権限を持つ委託ドライバー(個人事業主)は対象外にする(2026-08-07)。
+//    社員判定 = NexPort 中央人材マスタ staff_master.category='社員'(profile_id または電話で照合)。
+async function isNeltecStaff(caller: any): Promise<boolean> {
+  if (!caller) return false;
+  if (caller.role === 'super_admin') return true;         // 保守用に常に許可
+  if (caller.role !== 'admin') return false;
+  try {
+    const or = [`profile_id.eq.${caller.user_id}`, caller.phone ? `phone.eq.${caller.phone}` : ''].filter(Boolean).join(',');
+    const { data } = await caller.nx.from('staff_master').select('category').or(or).limit(5);
+    return (data ?? []).some((r: any) => String(r.category ?? '') === '社員');
+  } catch (_) { return false; }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
@@ -112,7 +127,7 @@ Deno.serve(async (req: Request) => {
 
     const caller = await authorizeCaller(body.auth_token);
     if (!caller) return json({ error: 'auth required', code: 'AUTH_REQUIRED' }, 401);
-    const isAdmin = caller.role === 'admin' || caller.role === 'super_admin';
+    const isAdmin = await isNeltecStaff(caller); // NELTEC社員の管理者のみ(委託ドライバーの管理者は不可)
     // 表示対象月の制限: 統合ビューア/通知運用は2026年7月開始。それより前の月は非管理者に表示しない。
     if (ym < '2026-07' && !isAdmin && !listAll) return json({ source: 'askul', found: false, reason: 'month_not_available', message: '2026年7月分より前は表示対象外です' });
     // 🔒 公開は支払通知メールの発行に合わせる(確定しただけでは本人にも出さない)
