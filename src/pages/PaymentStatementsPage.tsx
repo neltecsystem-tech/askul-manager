@@ -233,11 +233,21 @@ export default function PaymentStatementsPage() {
       </div>
 
       {(isAdmin || isOwner) && filtered.length > 0 && (
-        <div style={{ ...card, marginBottom: 16, display: 'flex', gap: 32 }}>
-          <Stat label="人数" value={filtered.length.toLocaleString() + '名'} />
-          <Stat label="総売上(税抜)" value={`¥${totals.revenue.toLocaleString()}`} />
-          <Stat label="控除合計" value={`¥${totals.deduction.toLocaleString()}`} />
-          <Stat label="支払合計" value={`¥${totals.payment.toLocaleString()}`} />
+        <div style={{ ...card, marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 32 }}>
+            <Stat label="人数" value={filtered.length.toLocaleString() + '名'} />
+            {/* ここは「売上」ではない。ドライバーごとの支払対象額(車建日マスタ置換・フォーム加算後)の
+                合計であり、アスクルへの請求額とは一致しない。会社の売上は月次締め/請求を正とする。 */}
+            <Stat label="支払対象額 合計(税抜)" value={`¥${totals.revenue.toLocaleString()}`} />
+            <Stat label="控除合計" value={`¥${totals.deduction.toLocaleString()}`} />
+            <Stat label="支払合計" value={`¥${totals.payment.toLocaleString()}`} />
+          </div>
+          <div style={{ marginTop: 10, fontSize: 12, color: colors.textMuted, lineHeight: 1.7 }}>
+            ※ 「支払対象額」はドライバーへの支払いを計算するための基礎額です。車建日・フォーム分を含むため、
+            アスクルへの<b>請求額（＝会社の売上）とは一致しません</b>。
+            <br />
+            ※ 会社の売上は「月次締め/請求」の総売上(税抜)が正です。NexPort の収支もそちらと同じ数字を表示します。
+          </div>
         </div>
       )}
 
@@ -259,7 +269,7 @@ export default function PaymentStatementsPage() {
                   {(isAdmin || isOwner) && <th style={th}>所属会社</th>}
                   {!hideAmounts && (
                     <>
-                      <th style={{ ...th, textAlign: 'right' }}>売上(税抜)</th>
+                      <th style={{ ...th, textAlign: 'right' }}>支払対象額(税抜)</th>
                       <th style={{ ...th, textAlign: 'right' }}>控除額</th>
                       <th style={{ ...th, textAlign: 'right' }}>支払額</th>
                     </>
