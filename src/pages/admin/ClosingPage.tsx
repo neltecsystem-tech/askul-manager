@@ -407,7 +407,13 @@ export default function ClosingPage() {
   const finalizePaymentStatements = async () => {
     if (aggregates.length === 0 || !dateFrom || !dateTo) return;
 
-    const eligible = aggregates.filter((a) => a.driver_id);
+    // 社員(employee)は支払明細書を作らない (給与制・歩合なし。明細ビューアは外注向け)。
+    const employeeIds = new Set(
+      profiles.filter((p) => p.business_type === 'employee').map((p) => String(p.id)),
+    );
+    const eligible = aggregates.filter(
+      (a) => a.driver_id && !employeeIds.has(String(a.driver_id)),
+    );
     if (eligible.length === 0) {
       alert('プロファイルに紐付いたドライバーがいません。');
       return;

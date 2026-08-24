@@ -108,11 +108,22 @@ Deno.serve(async (req: Request) => {
       admin.from('vehicle_days').select('month, day, amount').eq('active', true),
       admin.from('driver_deduction_rates').select('driver_id, effective_from, deduction_rate').order('effective_from'),
       admin.from('delivery_swaps').select('from_driver_name, to_driver_name, to_driver_code, period_from, period_to').is('reverted_at', null),
-      admin.from('closed_payment_statements').select('payment_amount, deduction_amount').eq('year', closedYear).eq('month', closedMonth),
+      admin.from('closed_payment_statements').select('driver_id, payment_amount, deduction_amount, driver_snapshot').eq('year', closedYear).eq('month', closedMonth),
     ]);
-    const closedRows = (closedRes.data ?? []) as { payment_amount: number; deduction_amount: number }[];
+    const closedRowsAll = (closedRes.data ?? []) as { driver_id: string; payment_amount: number; deduction_amount: number; driver_snapshot: { business_type?: string | null } | null }[];
 
     const profiles = (profilesRes.data ?? []) as { id: string; full_name: string; deduction_rate: number | null; business_type: string | null; monthly_salary: number | null; active: boolean }[];
+
+    // 🚨社員の確定明細は driver_payment に足さない。
+    //   社員は下の employee_salary_total(月給)で計上済みのため、足すと二重計上になる
+    //   (2026-07 前橋直弥 ¥281,160 / 2026-08 ¥447,563 が実際にズレていた)。
+    //   profiles を正とし、スナップショットの business_type も念のため見る。
+    const employeeProfileIds = new Set(
+      profiles.filter((p) => p.business_type === 'employee').map((p) => String(p.id)),
+    );
+    const closedRows = closedRowsAll.filter(
+      (r) => !employeeProfileIds.has(String(r.driver_id)) && r.driver_snapshot?.business_type !== 'employee',
+    );
 
     // 社員の月給合計 (アクティブな biz_type='employee' のみ)
     let employee_salary_total = 0;
@@ -277,10 +288,12 @@ Deno.serve(async (req: Request) => {
     }
 
     // ライブ集計 (確定前の月のフォールバック用)
-    let liveRevenuePayment = 0, liveDeduction = 0;
+    let liveRevenuePayment = 0, liveDeduction = 0, liveDriverCount = 0;
     for (const a of aggMap.values()) {
+      if (a.driver_id && employeeProfileIds.has(String(a.driver_id))) continue; // 社員は月給で計上(二重計上防止)
       liveRevenuePayment += a.revenue;
       liveDeduction += a.deduction_amount;
+      liveDriverCount++;
     }
     const liveDriverPayment = liveRevenuePayment - liveDeduction;
 
@@ -296,7 +309,7 @@ Deno.serve(async (req: Request) => {
       source = 'confirmed';
     } else {
       driver_payment = liveDriverPayment;
-      driver_count = aggMap.size;
+      driver_count = liveDriverCount;
       source = 'live';
     }
 

@@ -109,6 +109,8 @@ export default function PaymentStatementsPage() {
     const [y, m] = selectedYearMonth.split('-').map(Number);
     return statements
       .filter((s) => s.year === y && s.month === m)
+      // 社員は支払対象外 (給与制)。過去に確定された社員行が残っていても一覧・PDFに出さない。
+      .filter((s) => s.driver_snapshot?.business_type !== 'employee')
       .sort((a, b) =>
         (a.driver_snapshot?.full_name ?? '').localeCompare(
           b.driver_snapshot?.full_name ?? '',

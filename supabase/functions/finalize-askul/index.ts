@@ -248,7 +248,16 @@ Deno.serve(async (req) => {
     // ── 確定行 ──
     const nowIso = new Date().toISOString();
     const allAggs = Array.from(map.values());
-    const eligible = allAggs.filter((a) => a.driver_id);
+    // 社員(business_type='employee')は支払明細書を作らない。
+    //   給与制で売上歩合が無く、明細ビューアは外注(業務委託)向けのシステムのため。
+    //   稼働シートに名前が出るので売上には入るが、支払明細は対象外。
+    const employeeIds = new Set(
+      (profiles ?? []).filter((p: any) => p.business_type === 'employee').map((p: any) => String(p.id)),
+    );
+    const excludedEmployees = allAggs
+      .filter((a) => a.driver_id && employeeIds.has(String(a.driver_id)))
+      .map((a) => a.driver_name);
+    const eligible = allAggs.filter((a) => a.driver_id && !employeeIds.has(String(a.driver_id)));
     const results = eligible.map((agg) => {
       const daily = buildDailyRows(agg);
       const kodate_total = daily.reduce((s, r) => s + r.kodate, 0);
@@ -281,7 +290,7 @@ Deno.serve(async (req) => {
     const summary = results.map((r) => ({ name: r._name, revenue: r.revenue, kodate_total: r.kodate_total, vehicle_total: r.vehicle_total, deduction_rate: r.deduction_rate, deduction_amount: r.deduction_amount, payment_amount: r.payment_amount }));
 
     if (dryRun) {
-      return json({ ok: true, dry_run: true, year, month, period: { from: dateFrom, to: dateTo }, count: results.length, grand, drivers: summary, unregistered, alert: alertResult });
+      return json({ ok: true, dry_run: true, year, month, period: { from: dateFrom, to: dateTo }, count: results.length, grand, drivers: summary, unregistered, excluded_employees: excludedEmployees, alert: alertResult });
     }
 
     // 反映済みロック + upsert。force=true(変更を反映ボタン)は反映済みでも上書き再確定。
@@ -306,10 +315,10 @@ Deno.serve(async (req) => {
       finalized_at: nowIso, reflected_at: prevReflected.get(String(r.driver_id)) ?? (monthPublished ? nowIso : null),
     }));
     const lockedCount = results.length - payload.length;
-    if (payload.length === 0) return json({ ok: true, dry_run: false, saved: 0, locked: lockedCount, year, month, note: lockedCount ? '対象月は反映済み(ロック)' : '対象ドライバーなし', unregistered, alert: alertResult });
+    if (payload.length === 0) return json({ ok: true, dry_run: false, saved: 0, locked: lockedCount, year, month, note: lockedCount ? '対象月は反映済み(ロック)' : '対象ドライバーなし', unregistered, excluded_employees: excludedEmployees, alert: alertResult });
     const { error } = await admin.from('closed_payment_statements').upsert(payload, { onConflict: 'driver_id,year,month' });
     if (error) return json({ error: 'upsert failed: ' + error.message }, 500);
-    return json({ ok: true, dry_run: false, saved: payload.length, locked: lockedCount, year, month, grand, drivers: summary, unregistered, alert: alertResult });
+    return json({ ok: true, dry_run: false, saved: payload.length, locked: lockedCount, year, month, grand, drivers: summary, unregistered, excluded_employees: excludedEmployees, alert: alertResult });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
