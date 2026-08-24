@@ -382,17 +382,36 @@ export default function ClosingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [records, formResponses, profiles, rateHistoryByDriver, dateFrom, dateTo, swaps]);
 
+  // 社員(business_type='employee')の判定。給与制で歩合が無いため支払対象外。
+  //   売上には入る(会社の売上)が、ドライバー支払い合計には入れない。
+  const employeeIds = useMemo(
+    () => new Set(profiles.filter((p) => p.business_type === 'employee').map((p) => String(p.id))),
+    [profiles],
+  );
+  const isEmployeeAgg = (a: DriverAggregate) => !!a.driver_id && employeeIds.has(String(a.driver_id));
+  // ドライバー管理に未登録(driver_id なし)は明細を作れない。合計に混ぜず別枠で警告する。
+  const isUnregisteredAgg = (a: DriverAggregate) => !a.driver_id;
+
   const totals = useMemo(() => {
     let revenue = 0, payment = 0, invoice = 0;
+    let payableCount = 0;
+    let employeeCount = 0, employeePayment = 0;
+    let unregisteredCount = 0, unregisteredPayment = 0;
     for (const a of aggregates) {
       // 総売上(税抜) / アスクル請求(税込): シートP列単純合計ベース (車建日マスタ置換 / フォーム加算なし)
+      //   社員・未登録の稼働も会社の売上なので、ここは全員分を足す。
       revenue += a.invoice_revenue;
       invoice += Math.round(a.invoice_revenue * 1.1);
       // ドライバー支払い: 車建日マスタ置換 + フォーム加算込みの売上から控除を引く
-      payment += a.revenue - a.deduction_amount;
+      const pay = a.revenue - a.deduction_amount;
+      if (isEmployeeAgg(a)) { employeeCount++; employeePayment += pay; continue; }
+      if (isUnregisteredAgg(a)) { unregisteredCount++; unregisteredPayment += pay; continue; }
+      payment += pay;
+      payableCount++;
     }
-    return { revenue, payment, invoice };
-  }, [aggregates]);
+    return { revenue, payment, invoice, payableCount, employeeCount, employeePayment, unregisteredCount, unregisteredPayment };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aggregates, employeeIds]);
 
   const selected = selectedDriver
     ? aggregates.find((a) => (a.driver_code || a.driver_name) === selectedDriver)
@@ -646,11 +665,29 @@ export default function ClosingPage() {
         </div>
       </div>
 
-      <div style={{ ...card, marginBottom: 16, display: 'flex', gap: 32 }}>
-        <Stat label="対象ドライバー" value={aggregates.length.toLocaleString() + '名'} />
-        <Stat label="総売上(税抜)" value={`¥${totals.revenue.toLocaleString()}`} />
-        <Stat label="ドライバー支払い合計" value={`¥${totals.payment.toLocaleString()}`} />
-        <Stat label="アスクル請求合計(税込)" value={`¥${totals.invoice.toLocaleString()}`} />
+      <div style={{ ...card, marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 32 }}>
+          <Stat label="対象ドライバー" value={totals.payableCount.toLocaleString() + '名'} />
+          <Stat label="総売上(税抜)" value={`¥${totals.revenue.toLocaleString()}`} />
+          <Stat label="ドライバー支払い合計" value={`¥${totals.payment.toLocaleString()}`} />
+          <Stat label="アスクル請求合計(税込)" value={`¥${totals.invoice.toLocaleString()}`} />
+        </div>
+        {(totals.employeeCount > 0 || totals.unregisteredCount > 0) && (
+          <div style={{ marginTop: 10, fontSize: 11, color: colors.textMuted, lineHeight: 1.8 }}>
+            {totals.employeeCount > 0 && (
+              <div>
+                ※ 社員 {totals.employeeCount}名 (¥{totals.employeePayment.toLocaleString()}) は支払対象外のため
+                「ドライバー支払い合計」に含めていません（給与制・歩合なし）。売上には含みます。
+              </div>
+            )}
+            {totals.unregisteredCount > 0 && (
+              <div style={{ color: colors.danger }}>
+                ⚠ ドライバー管理に未登録 {totals.unregisteredCount}名 (¥{totals.unregisteredPayment.toLocaleString()}) は
+                支払明細書を作れないため合計から除いています。登録するか、社員なら事業形態=社員に設定してください。
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={card}>
@@ -691,6 +728,16 @@ export default function ClosingPage() {
                     <tr key={key}>
                       <td style={td}>
                         {a.driver_name}
+                        {isEmployeeAgg(a) && (
+                          <span style={{ marginLeft: 6, fontSize: 10, background: '#f3e8ff', color: '#6b21a8', padding: '1px 6px', borderRadius: 8 }}>
+                            社員 / 支払対象外
+                          </span>
+                        )}
+                        {isUnregisteredAgg(a) && (
+                          <span style={{ marginLeft: 6, fontSize: 10, background: '#fee2e2', color: '#991b1b', padding: '1px 6px', borderRadius: 8 }}>
+                            ⚠ 未登録
+                          </span>
+                        )}
                         <div style={{ fontSize: 11, color: colors.textMuted }}>
                           {a.driver_code}
                         </div>
