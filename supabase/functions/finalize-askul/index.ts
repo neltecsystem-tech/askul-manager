@@ -24,6 +24,40 @@ const PRICE_CATEGORY_NAMES: Record<number, string> = {
   201: '通常配達・返品', 220: 'ブックオフ', 326: 'ウォーターサーバー', 351: '代引き',
 };
 
+// ── 一時的な失敗のリトライ ─────────────────────────────────
+// 🚨 2026-08-25 の自動確定が Google Sheets の 503 (The service is currently unavailable)
+//    一発で丸ごと落ちた。pg_cron は net.http_post を投げた時点で "succeeded" になるので
+//    誰も気付かず、支払明細が古いまま残る。Google 側の一時障害は数秒〜数十秒で戻るため、
+//    まず指数バックオフで粘る(それでも駄目なら下のアラートで人に知らせる)。
+const RETRY_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+const BACKOFF_MS = [1000, 3000, 8000, 15000];
+async function fetchRetry(url: string, init: RequestInit, label = ''): Promise<Response> {
+  let last: unknown = null;
+  for (let i = 0; i <= BACKOFF_MS.length; i++) {
+    try {
+      const r = await fetch(url, init);
+      if (r.ok) return r;
+      // 4xx(権限・範囲指定ミス等)は再試行しても直らないのでそのまま返す
+      if (!RETRY_STATUS.has(r.status)) return r;
+      last = new Error(`${label}${r.status}: ${(await r.text()).slice(0, 300)}`);
+    } catch (e) { last = e; }
+    if (i < BACKOFF_MS.length) await new Promise((res) => setTimeout(res, BACKOFF_MS[i]));
+  }
+  throw last instanceof Error ? last : new Error(String(last));
+}
+
+// 常設アラート基盤(NexPort sm_active_alerts)へ通知。names が空なら解消扱い。
+async function pushAlert(kind: string, month: string, names: string[]): Promise<any> {
+  try {
+    const r = await fetch(ALERT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + NEXPORT_ANON, 'apikey': NEXPORT_ANON },
+      body: JSON.stringify({ action: 'sync', app: 'shift-manager', kind, month, names }),
+    });
+    return await r.json().catch(() => ({ status: r.status }));
+  } catch (e) { return { error: String((e as Error)?.message || e) }; }
+}
+
 // ── Google Service Account 署名(RS256) → Sheets read (fetch-delivery-records と同一) ──
 function b64url(s: string): string { return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 async function getAccessToken(): Promise<string> {
@@ -38,16 +72,18 @@ async function getAccessToken(): Promise<string> {
   const key = await crypto.subtle.importKey('pkcs8', binaryDer, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
   const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(`${header}.${payload}`));
   const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  const r = await fetch('https://oauth2.googleapis.com/token', {
+  const r = await fetchRetry('https://oauth2.googleapis.com/token', {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${header}.${payload}.${sigB64}`,
-  });
-  return (await r.json()).access_token;
+  }, 'Google 認証 ');
+  const tj = await r.json();
+  if (!tj.access_token) throw new Error('Google 認証に失敗: ' + (tj.error_description || tj.error || 'token なし'));
+  return tj.access_token;
 }
 async function readSheet(saToken: string, sheetName: string, range: string, render: string): Promise<(string | number)[][]> {
   const url = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(SHEET_ID) +
     '/values/' + encodeURIComponent(`${sheetName}!${range}`) + `?majorDimension=ROWS&valueRenderOption=${render}`;
-  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + saToken } });
+  const res = await fetchRetry(url, { headers: { Authorization: 'Bearer ' + saToken } }, 'Sheets ');
   if (!res.ok) throw new Error(`Sheets ${res.status}: ${await res.text()}`);
   return ((await res.json()).values ?? []) as (string | number)[][];
 }
@@ -80,8 +116,10 @@ async function isNexportAdmin(authToken: string): Promise<boolean> {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+  let reqBody: any = {};// 失敗アラートで対象月を出すため、catch からも見えるところに持つ
   try {
     const body = await req.json().catch(() => ({}));
+    reqBody = body;
     const mode = body.mode === 'reflect' ? 'reflect' : 'finalize';
     const dryRun = mode === 'finalize' && body.dry_run !== false;
     const bearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
@@ -278,14 +316,7 @@ Deno.serve(async (req) => {
 
     // 未登録(シート稼働あり・profile未紐付け) → NexPort アラート
     const unregistered = allAggs.filter((a) => !a.driver_id && (a.revenue > 0 || a.invoice_revenue > 0)).map((a) => a.driver_name);
-    let alertResult: any = null;
-    try {
-      const ar = await fetch(ALERT_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + NEXPORT_ANON, 'apikey': NEXPORT_ANON },
-        body: JSON.stringify({ action: 'sync', app: 'shift-manager', kind: 'askul_unregistered', month: `${year}-${String(month).padStart(2, '0')}`, names: unregistered }),
-      });
-      alertResult = await ar.json().catch(() => ({ status: ar.status }));
-    } catch (e) { alertResult = { error: String((e as Error)?.message || e) }; }
+    const alertResult = await pushAlert('askul_unregistered', `${year}-${String(month).padStart(2, '0')}`, unregistered);
 
     const summary = results.map((r) => ({ name: r._name, revenue: r.revenue, kodate_total: r.kodate_total, vehicle_total: r.vehicle_total, deduction_rate: r.deduction_rate, deduction_amount: r.deduction_amount, payment_amount: r.payment_amount }));
 
@@ -317,9 +348,21 @@ Deno.serve(async (req) => {
     const lockedCount = results.length - payload.length;
     if (payload.length === 0) return json({ ok: true, dry_run: false, saved: 0, locked: lockedCount, year, month, note: lockedCount ? '対象月は反映済み(ロック)' : '対象ドライバーなし', unregistered, excluded_employees: excludedEmployees, alert: alertResult });
     const { error } = await admin.from('closed_payment_statements').upsert(payload, { onConflict: 'driver_id,year,month' });
-    if (error) return json({ error: 'upsert failed: ' + error.message }, 500);
+    if (error) throw new Error('upsert failed: ' + error.message);
+    // 確定できた = 前回の失敗アラートは解消
+    await pushAlert('askul_finalize_failed', `${year}-${String(month).padStart(2, '0')}`, []);
     return json({ ok: true, dry_run: false, saved: payload.length, locked: lockedCount, year, month, grand, drivers: summary, unregistered, excluded_employees: excludedEmployees, alert: alertResult });
   } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+    const msg = e instanceof Error ? e.message : String(e);
+    // 🚨 pg_cron は net.http_post を投げた時点で成功扱いになり、EFの500は誰にも見えない。
+    //    (2026-08-25 の Sheets 503 がこれで丸1週間気付かれなかった)
+    //    失敗を常設アラートに出して、人が確定し直せるようにする。
+    try {
+      const ym = String(reqBody?.year_month || '');
+      if (/^\d{4}-\d{2}$/.test(ym) && reqBody?.mode !== 'reflect' && reqBody?.dry_run === false) {
+        await pushAlert('askul_finalize_failed', ym, [msg.slice(0, 200)]);
+      }
+    } catch (_) { /* アラート送信の失敗で応答を壊さない */ }
+    return json({ error: msg }, 500);
   }
 });

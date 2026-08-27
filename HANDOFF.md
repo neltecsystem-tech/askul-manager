@@ -28,3 +28,19 @@
 
 ## 必要シークレット(git管理外)
 - askul の anon キー(.env.local)。DB直接操作は Supabase PAT(別途共有)。
+
+## 自動確定/反映の cron (askul DB の pg_cron)
+
+| job | schedule (UTC) | JST | 中身 |
+|---|---|---|---|
+| askul-finalize | `0 13 25 * *` | 25日 22:00 | finalize-askul を `dry_run:false` で叩く(当月=締め月) |
+| askul-finalize-retry | `0 13 26,27 * *` | 26/27日 22:00 | **その月の確定行が0件のときだけ** finalize を叩く拾い直し。行がある月は触らない(手修正の上書き防止) |
+| askul-reflect | `0 1 28-31 * *` | 28-31日 10:00 | 月末日だけ `mode:'reflect'` を叩く(= 明細ビューア公開 + 会計の自動入力に出る) |
+
+- **反映(reflected_at)が入るまで会計の自動入力には出ない**(pay-sheet-sync が `reflected_at is not null` で絞る)。
+  「確定したのに会計に出ない」はほぼこれ。月末反映を待つか、締め画面から反映する。
+- pg_cron は `net.http_post` を投げた時点で成功扱いになる。**EFが500でも job_run_details は succeeded**。
+  失敗の実体は `net._http_response` を見る。加えて finalize-askul は失敗時に
+  常設アラート `askul_finalize_failed:<YYYY-MM>` を上げる(成功で自動解消)。
+- 2026-08-25 の自動確定は Google Sheets 503 で落ちた。以降 Sheets/認証の呼び出しは
+  408/429/5xx を 1s→3s→8s→15s で再試行する。
