@@ -185,6 +185,16 @@ Deno.serve(async (req: Request) => {
       .select('id, full_name, phone, business_type, company_name, office_id');
     if (pErr) return json({ error: 'profiles fetch failed: ' + pErr.message }, 500);
 
+    // 社員(business_type='employee')は支払明細の対象外(給与制)。
+    //   確定EF側では除外済みだが、除外を入れる前に確定された月の行がDBに残っているため、
+    //   ビューアでも読み出し時に落とす。profiles を正とし、スナップショットの値も念のため見る。
+    //   (askul画面の一覧・monthly-balance も同じ条件で除外している)
+    const employeeIds = new Set(
+      (profiles ?? []).filter((p: any) => p.business_type === 'employee').map((p: any) => String(p.id)),
+    );
+    const isEmployeeStmt = (s: any) =>
+      employeeIds.has(String(s.driver_id)) || s.driver_snapshot?.business_type === 'employee';
+
     if (listAll) {
       // 取引先一覧: 当月の確定明細(closed_payment_statements)を管理者へ返す。
       // ※ reflected_at ゲートは撤廃(2026-07): 確定済みなら即ビューア表示(会計はシート取込が正=別管理)。
@@ -195,7 +205,7 @@ Deno.serve(async (req: Request) => {
         .eq('month', month);
       if (sErr) return json({ error: 'statements fetch failed: ' + sErr.message }, 500);
       const phoneById = new Map((profiles ?? []).map((p: any) => [p.id, p.phone]));
-      const rows = (stmts ?? []).map((s: any) => ({
+      const rows = (stmts ?? []).filter((s: any) => !isEmployeeStmt(s)).map((s: any) => ({
         driver_id: s.driver_id,
         driver_name: s.driver_snapshot?.full_name ?? '',
         phone: phoneById.get(s.driver_id) ?? null,
@@ -242,7 +252,7 @@ Deno.serve(async (req: Request) => {
       .eq('year', year)
       .eq('month', month);
     if (sErr) return json({ error: 'statements fetch failed: ' + sErr.message }, 500);
-    const rows = (stmts ?? []).map((s: any) => ({
+    const rows = (stmts ?? []).filter((s: any) => !isEmployeeStmt(s)).map((s: any) => ({
       driver_id: s.driver_id,
       driver_name: s.driver_snapshot?.full_name ?? '',
       company_name: s.driver_snapshot?.company_name ?? null,
