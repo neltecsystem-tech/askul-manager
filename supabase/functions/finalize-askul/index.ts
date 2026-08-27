@@ -70,6 +70,20 @@ async function triggerAccAutofill(month: string): Promise<any> {
   } catch (e) { return { error: String((e as Error)?.message || e) }; }
 }
 
+// その月の支払通知が1件でも発行されているか(NexPort pay_statement_acceptance.issued_at)。
+// 発行後は金額を動かさない = 確定の上書きロックの条件。
+async function isNoticeIssued(ym: string): Promise<boolean> {
+  const url = Deno.env.get('NEXPORT_SUPABASE_URL') ?? '';
+  const key = Deno.env.get('NEXPORT_SERVICE_ROLE_KEY') ?? '';
+  if (!url || !key) return false;// 参照できないときはロックしない(確定を止めない)
+  try {
+    const nx = createClient(url, key);
+    const { count } = await nx.from('pay_statement_acceptance')
+      .select('id', { count: 'exact', head: true }).eq('month', ym).not('issued_at', 'is', null);
+    return (count ?? 0) > 0;
+  } catch (_) { return false; }
+}
+
 // 常設アラート基盤(NexPort sm_active_alerts)へ通知。names が空なら解消扱い。
 async function pushAlert(kind: string, month: string, names: string[]): Promise<any> {
   try {
@@ -378,33 +392,40 @@ Deno.serve(async (req) => {
     }
 
     // 反映済みロック + upsert。force=true(変更を反映ボタン)は反映済みでも上書き再確定。
+    // ── 運用の流れ (2026-08-27 にこの形へ揃えた) ──────────────
+    //   25日 仮確定 → その場で会計へ出す(reflected_at をセット)
+    //   25〜末日  修正があれば確定し直す → 会計もその都度作り直す
+    //   末日 本確定(force) → 最終値で会計を更新
+    //   その後 支払通知の発行(1日/11日) → ここで初めてドライバーが明細ビューアで見られる
+    //
+    // 🚨 ロックの条件は「支払通知を発行したか」。以前は reflected_at で掛けていたが、
+    //    反映は"会計に出した"印にすぎず、ドライバー公開は支払通知の発行で決まる
+    //    (pay-statement-by-phone の公開ゲート・2026-08-05)。reflected_at でロックすると
+    //    仮確定した瞬間に上書き不可になり、「修正して反映」が回らなくなる。
+    //    本当に守りたいのは「通知した金額が後から動くこと」なので、そこだけロックする。
     const force = body.force === true;
-    const { data: existing } = await admin.from('closed_payment_statements').select('driver_id, reflected_at').eq('year', year).eq('month', month);
-    const lockedIds = force ? new Set<any>() : new Set((existing ?? []).filter((r: any) => r.reflected_at).map((r: any) => r.driver_id));
-    // ★既に反映済みの行は reflected_at を引き継ぐ。
-    //   force 再確定で無条件に null にすると、公開済みの明細が明細ビューアの取引先一覧から
-    //   消える(一覧は reflected_at セット済のみ対象)。金額を直して再確定するたびに公開が
-    //   取り消され、続けて reflect が走らないと戻らない、という事故になる
-    //   (デリバリー finalize-yamato で 2026-07 の9名が消えていたのと同じ原因)。
-    //   新規に確定される行は従来どおり null で始まり、reflect まで非公開のまま。
-    const prevReflected = new Map<string, string | null>(
-      (existing ?? []).map((r: any) => [String(r.driver_id), r.reflected_at ?? null]),
-    );
-    // 既に公開済みの月に後から作られた行は、その場で公開する(次の反映まで見えないのを防ぐ)
-    const monthPublished = (existing ?? []).some((r: any) => r.reflected_at);
-    const payload = results.filter((r) => !lockedIds.has(r.driver_id)).map((r) => ({
+    const ymStr = `${year}-${String(month).padStart(2, '0')}`;
+    const noticeIssued = await isNoticeIssued(ymStr);
+    if (noticeIssued && !force) {
+      return json({ ok: true, dry_run: false, saved: 0, locked: 'notice_issued', year, month,
+        note: '支払通知を発行済みの月なので上書きしません(通知した金額と食い違うため)。直す場合は画面の「変更を反映」(force)を使ってください',
+        unregistered, excluded_employees: excludedEmployees, alert: alertResult });
+    }
+    const payload = results.map((r) => ({
       driver_id: r.driver_id, year, month, revenue: r.revenue, kodate_total: r.kodate_total, vehicle_total: r.vehicle_total,
       deduction_rate: r.deduction_rate, deduction_amount: r.deduction_amount, payment_amount: r.payment_amount,
       daily_rows: r.daily_rows, category_matrix: r.category_matrix, driver_snapshot: r.driver_snapshot,
-      finalized_at: nowIso, reflected_at: prevReflected.get(String(r.driver_id)) ?? (monthPublished ? nowIso : null),
+      // 確定したら会計に出す。ドライバーには通知発行まで見えないので、早く出して困らない。
+      finalized_at: nowIso, reflected_at: nowIso,
     }));
-    const lockedCount = results.length - payload.length;
-    if (payload.length === 0) return json({ ok: true, dry_run: false, saved: 0, locked: lockedCount, year, month, note: lockedCount ? '対象月は反映済み(ロック)' : '対象ドライバーなし', unregistered, excluded_employees: excludedEmployees, alert: alertResult });
+    if (payload.length === 0) return json({ ok: true, dry_run: false, saved: 0, year, month, note: '対象ドライバーなし', unregistered, excluded_employees: excludedEmployees, alert: alertResult });
     const { error } = await admin.from('closed_payment_statements').upsert(payload, { onConflict: 'driver_id,year,month' });
     if (error) throw new Error('upsert failed: ' + error.message);
     // 確定できた = 前回の失敗アラートは解消
-    await pushAlert('askul_finalize_failed', `${year}-${String(month).padStart(2, '0')}`, []);
-    return json({ ok: true, dry_run: false, saved: payload.length, locked: lockedCount, year, month, grand, drivers: summary, unregistered, excluded_employees: excludedEmployees, alert: alertResult });
+    await pushAlert('askul_finalize_failed', ymStr, []);
+    // 会計(支払計算書)もこの月を作り直す。押し忘れで古いまま進むのを防ぐ。
+    const acc = await triggerAccAutofill(ymStr);
+    return json({ ok: true, dry_run: false, saved: payload.length, year, month, grand, drivers: summary, unregistered, excluded_employees: excludedEmployees, alert: alertResult, acc });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // 🚨 pg_cron は net.http_post を投げた時点で成功扱いになり、EFの500は誰にも見えない。
