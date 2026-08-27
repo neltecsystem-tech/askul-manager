@@ -46,6 +46,30 @@ async function fetchRetry(url: string, init: RequestInit, label = ''): Promise<R
   throw last instanceof Error ? last : new Error(String(last));
 }
 
+// 反映した月は会計(支払計算書)も作り直す。
+//   反映=会計に出せる状態になった瞬間なので、ここで繋いでおかないと
+//   「反映したのに会計に出ない」が残る(会計側の日次cronは"前月"しか見ない)。
+//   ※ 支払通知を発行済みの月は acc-autofill 側でスキップされる(通知額との食い違い防止)。
+const ACC_AUTOFILL_URL = Deno.env.get('ACC_AUTOFILL_URL') ?? 'https://nccognptoprhwsbjnwcu.supabase.co/functions/v1/acc-autofill';
+async function triggerAccAutofill(month: string): Promise<any> {
+  const secret = Deno.env.get('ACC_AUTOFILL_CRON_SECRET') ?? '';
+  if (!secret) return { skipped: 'ACC_AUTOFILL_CRON_SECRET 未設定' };
+  // 🚨 古い月の会計は自動で作り直さない。締めた後の月次を後から動かさないため。
+  //    対象は当月と前月まで(それ以前の取り残しは反映=ビューア公開だけ行い、会計は人が判断する)。
+  const jst = new Date(Date.now() + 9 * 3600 * 1000);
+  const cur = jst.getUTCFullYear() * 12 + jst.getUTCMonth();
+  const tgt = Number(month.slice(0, 4)) * 12 + (Number(month.slice(5, 7)) - 1);
+  if (cur - tgt > 1) return { skipped: `${month} は当月/前月より古いため会計は自動更新しない` };
+  try {
+    const r = await fetch(ACC_AUTOFILL_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + NEXPORT_ANON, 'apikey': NEXPORT_ANON },
+      body: JSON.stringify({ month, cron_secret: secret }),
+    });
+    return await r.json().catch(() => ({ status: r.status }));
+  } catch (e) { return { error: String((e as Error)?.message || e) }; }
+}
+
 // 常設アラート基盤(NexPort sm_active_alerts)へ通知。names が空なら解消扱い。
 async function pushAlert(kind: string, month: string, names: string[]): Promise<any> {
   try {
@@ -135,6 +159,33 @@ Deno.serve(async (req) => {
     if (!authorized && body.auth_token) authorized = await isNexportAdmin(String(body.auth_token));
     if (!dryRun && !authorized) return json({ error: '書込(確定/反映)は権限がありません。cron/管理者のみ。', code: 'FORBIDDEN' }, 403);
 
+    // 反映の取り残しを拾う(月指定なし): 未反映の行がある月を全部見て、締めが終わった月を反映する。
+    // 🚨 反映が「月末1回きり」だと、確定がそれより後になった月は永久に取り残される。
+    //    2026-06 は 7/17 確定で反映日(6/30)を過ぎていたため、ずっと未反映のままだった。
+    //    未反映 = 明細ビューア非公開 + 会計の自動入力に出ない(pay-sheet-sync が reflected_at で絞る)。
+    //    毎日この処理を回すことで、遅れて確定した月も翌日には反映される。
+    if (mode === 'reflect' && body.all_pending === true) {
+      const { data: pend, error: pe } = await admin.from('closed_payment_statements')
+        .select('year, month').is('reflected_at', null);
+      if (pe) return json({ error: 'reflect failed: ' + pe.message }, 500);
+      const months = [...new Set((pend ?? []).map((r: any) => `${r.year}-${String(r.month).padStart(2, '0')}`))].sort();
+      const todayJst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+      const out: any[] = [];
+      for (const ym of months) {
+        const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+        // 反映予定日 = その月の末日(従来の月末反映と同じタイミングを守る)
+        const lastDay = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+        if (todayJst < lastDay) { out.push({ month: ym, waiting_until: lastDay }); continue; }
+        const { data: upd, error } = await admin.from('closed_payment_statements')
+          .update({ reflected_at: new Date().toISOString() })
+          .eq('year', y).eq('month', m).is('reflected_at', null).select('driver_id');
+        if (error) { out.push({ month: ym, error: error.message }); continue; }
+        const n = (upd ?? []).length;
+        out.push({ month: ym, reflected: n, acc: n ? await triggerAccAutofill(ym) : null });
+      }
+      return json({ ok: true, mode: 'reflect', all_pending: true, months: out });
+    }
+
     if (!/^\d{4}-\d{2}$/.test(String(body.year_month ?? ''))) return json({ error: 'year_month (締め当月 YYYY-MM) が必要です' }, 400);
     const year = Number(String(body.year_month).slice(0, 4));
     const month = Number(String(body.year_month).slice(5, 7));
@@ -146,7 +197,9 @@ Deno.serve(async (req) => {
         .update({ reflected_at: new Date().toISOString() })
         .eq('year', year).eq('month', month).is('reflected_at', null).select('driver_id');
       if (error) return json({ error: 'reflect failed: ' + error.message }, 500);
-      return json({ ok: true, mode: 'reflect', year, month, reflected: (upd ?? []).length });
+      const n = (upd ?? []).length;
+      const acc = n ? await triggerAccAutofill(String(body.year_month)) : null;
+      return json({ ok: true, mode: 'reflect', year, month, reflected: n, acc });
     }
 
     // ── データ取得: 2シート(SA) + DB各表 ──
