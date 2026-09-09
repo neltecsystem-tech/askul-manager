@@ -19,6 +19,26 @@ const SA = JSON.parse(Deno.env.get('GOOGLE_SERVICE_ACCOUNT_KEY')!);
 const ALERT_URL = Deno.env.get('SHIFT_ALERT_URL') ?? 'https://nccognptoprhwsbjnwcu.supabase.co/functions/v1/shift-alert';
 const NEXPORT_ANON = Deno.env.get('NEXPORT_ANON_KEY') ?? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jY29nbnB0b3ByaHdzYmpud2N1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNDU0NDEsImV4cCI6MjA4OTkyMTQ0MX0.M3h31uPyKYWlNevVW3OvZOonoTidC1KLZ04sB5nRKzU';
 
+// 🚨 支払先(宛名)になり得ない会社名。委託元(荷主)と営業所名。
+//    ドライバー登録の「会社名」欄に委託元を書いてしまうことがあり(2026-09-09に個人事業主4名が
+//    company_name='アスクル')、確定明細のスナップショットに入ると統合支払明細ビューアの
+//    支払通知書が「アスクル 様」になる。金額は正しいので誰も気付けない。
+//    委託元は金を渡す側、営業所は自社の場所で、どちらも支払先ではないため確定時に落とす。
+const NON_PAYEE_CO = [
+  'アスクル', 'ASKUL', 'アスクル株式会社', 'ASKUL LOGIST',
+  'ヤマト', 'ヤマト運輸', 'SBS', 'SBSネクサード株式会社',
+  '東スポ', '東京スポーツ', '新聞', 'デリバリー', '配送',
+  '城北', '川越', '立川', '川崎高津',
+];
+const coKeyNP = (v: unknown) => String(v ?? '').normalize('NFKC')
+  .replace(/株式会社|\(株\)|㈱|有限会社|\(有\)|㈲|合同会社|\(合\)/g, '')
+  .replace(/[\s・.,'’`-]+/g, '').toLowerCase();
+const NON_PAYEE_KEYS = new Set(NON_PAYEE_CO.map(coKeyNP).filter(Boolean));
+const payeeCo = (v: unknown): string | null => {
+  const s = String(v ?? '').trim();
+  return (!s || NON_PAYEE_KEYS.has(coKeyNP(s))) ? null : s;
+};
+
 const PRICE_CATEGORY_NAMES: Record<number, string> = {
   4: 'オリコン蓋', 9: 'オリコン', 10: '段ボール', 100: 'カタログ・トナー・サンゲッツ・花',
   201: '通常配達・返品', 220: 'ブックオフ', 326: 'ウォーターサーバー', 351: '代引き',
@@ -374,7 +394,7 @@ Deno.serve(async (req) => {
         deduction_rate: agg.deduction_rate, deduction_amount: agg.deduction_amount,
         payment_amount: revenue - agg.deduction_amount,
         daily_rows: daily, category_matrix: buildCategoryMatrix(agg),
-        driver_snapshot: profile ? { full_name: profile.full_name, office_id: profile.office_id, office_name: officeName.get(profile.office_id) ?? null, business_type: profile.business_type, company_name: profile.company_name } : null,
+        driver_snapshot: profile ? { full_name: profile.full_name, office_id: profile.office_id, office_name: officeName.get(profile.office_id) ?? null, business_type: profile.business_type, company_name: payeeCo(profile.company_name) } : null,
         _name: agg.driver_name,
       };
     });
