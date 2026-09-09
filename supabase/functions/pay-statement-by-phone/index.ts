@@ -77,10 +77,19 @@ async function authorizeCaller(authToken: string | undefined): Promise<any | nul
     .eq('id', user.id)
     .maybeSingle();
   if (!profile) return null;
+  // 🔧 2026-09-09: 本人照合の電話は profiles.phone だけを見ていたが、この欄はビューアで
+  //    本人が手入力する値で、空だったり桁が壊れていることがある(先頭0落ち・9桁など)。
+  //    明細は phone の完全一致で引くため、そうなると本人には「明細がありません」としか
+  //    見えない。使える形でなければ中央人材マスタ(profile_id で紐付く)を採る。
+  let phone = normalizePhone(profile.phone || '');
+  if (phone.length < 10) {
+    const { data: sm } = await nx.from('staff_master').select('phone').eq('profile_id', user.id).not('phone', 'is', null).limit(1);
+    phone = normalizePhone(String((sm ?? [])[0]?.phone ?? ''));
+  }
   return {
     user_id: user.id,
     role: profile.role || '',
-    phone: normalizePhone(profile.phone || ''),
+    phone,
     is_company_owner: !!profile.is_company_owner,
     company: profile.company || '',
     nx,
