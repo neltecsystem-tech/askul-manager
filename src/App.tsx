@@ -12,6 +12,7 @@ import DeliveriesPage from './pages/DeliveriesPage';
 import MyDeliveriesPage from './pages/MyDeliveriesPage';
 import MonthlyVolumePage from './pages/MonthlyVolumePage';
 import ClosingPage from './pages/admin/ClosingPage';
+import PaySuspensionPage from './pages/admin/PaySuspensionPage';
 import VehicleDaysPage from './pages/admin/VehicleDaysPage';
 import ExpensesPage from './pages/admin/ExpensesPage';
 import SettingsPage from './pages/admin/SettingsPage';
@@ -137,6 +138,14 @@ export default function App() {
               }
             />
             <Route path="payment-statements" element={<PaymentStatementsPage />} />
+            <Route
+              path="pay-suspension"
+              element={
+                <RequireAdmin>
+                  <PaySuspensionPage />
+                </RequireAdmin>
+              }
+            />
             <Route path="manual" element={<ManualPage />} />
             <Route
               path="settings"

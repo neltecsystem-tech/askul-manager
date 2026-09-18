@@ -49,6 +49,7 @@ const DEFAULT_ITEMS: { key: string; label: string; fallbackAdmin: boolean; fallb
   { key: 'swap-delivery', label: 'データ付け替え', fallbackAdmin: true, fallbackDriver: false },
   { key: 'closing', label: '月次締め/請求', fallbackAdmin: true, fallbackDriver: false },
   { key: 'payment-statements', label: '支払明細書', fallbackAdmin: true, fallbackDriver: true },
+  { key: 'pay-suspension', label: '🚫 支払停止', fallbackAdmin: true, fallbackDriver: false },
   { key: 'work-records', label: '稼働メモ', fallbackAdmin: true, fallbackDriver: true },
   { key: 'manual', label: '📖 マニュアル', fallbackAdmin: true, fallbackDriver: true },
 ];

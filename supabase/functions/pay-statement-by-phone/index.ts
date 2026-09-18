@@ -103,6 +103,32 @@ async function authorizeCaller(authToken: string | undefined): Promise<any | nul
 //   ②は保険。支払0円・メール未登録・明細停止などで通知が出ない人が、いつまでも自分の明細を
 //   見られなくなるのを防ぐ。管理者(admin/super_admin)は従来どおり常に閲覧できる。
 const PUBLISH_MSG = 'この月の明細は、支払通知書の発行後に公開されます（毎月1日・11日の朝に発行）。もうしばらくお待ちください。';
+
+/**
+ * 支払停止(明細発行STOP)に入っている月か。
+ *
+ * 重大な契約違反などで支払いを保留している人は、確定・会計はそのままに
+ * 明細だけ出さない。判定は workchat の pay-suspension に一本化する
+ * (3ツールで別々に持つと「どこで止まっているか」が分からなくなるため)。
+ *
+ * 🚨 止まっているかどうかだけを見て、理由は受け取らない。
+ *    理由は社内向けの記録で、本人に見せてはいけない。
+ * 🚨 判定に失敗したときは「止まっていない」扱いにする。中央が落ちた時に
+ *    全員の明細が見えなくなる方が被害が大きいため。
+ */
+async function suspendedFor(profileId: string, ym: string): Promise<{ suspended: boolean; message?: string }> {
+  if (!profileId) return { suspended: false };
+  try {
+    const r = await fetch('https://nccognptoprhwsbjnwcu.supabase.co/functions/v1/pay-suspension', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'check', profile_id: profileId, ym }),
+    }).then((x) => x.json());
+    return r?.suspended === true ? { suspended: true, message: String(r.message || '') } : { suspended: false };
+  } catch {
+    return { suspended: false };
+  }
+}
+
 function publishOpenAt(ym: string): number {
   const [y, m] = ym.split('-').map(Number);
   return Date.UTC(y, m, 11, 0, 0, 0); // 翌月11日 00:00 UTC = 09:00 JST
@@ -146,6 +172,13 @@ Deno.serve(async (req: Request) => {
     const isAdmin = await isNeltecStaff(caller); // NELTEC社員の管理者のみ(委託ドライバーの管理者は不可)
     // 表示対象月の制限: 統合ビューア/通知運用は2026年7月開始。それより前の月は非管理者に表示しない。
     if (ym < '2026-07' && !isAdmin && !listAll) return json({ source: 'askul', found: false, reason: 'month_not_available', message: '2026年7月分より前は表示対象外です' });
+    // 🔒 支払停止(明細発行STOP)。公開ゲートより先に見る。
+    //    公開ゲートには「翌月11日を過ぎたら出す」保険があるので、後に置くと
+    //    止めたはずの明細が11日に出てしまう。
+    if (!listAll && !isAdmin) {
+      const sus = await suspendedFor(caller.user_id, ym);
+      if (sus.suspended) return json({ source: 'askul', found: false, reason: 'suspended', message: sus.message });
+    }
     // 🔒 公開は支払通知メールの発行に合わせる(確定しただけでは本人にも出さない)
     if (!listAll && !isAdmin && !(await noticePublished(caller.nx, caller.user_id, ym)))
       return json({ source: 'askul', found: false, reason: 'not_published', message: PUBLISH_MSG });
