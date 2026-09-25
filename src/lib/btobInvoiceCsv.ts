@@ -1,36 +1,55 @@
 import Encoding from 'encoding-japanese';
 
-// BtoBプラットフォーム請求書(インフォマート)の「請求書標準フォーマット」CSV を作る。
+// BtoBプラットフォーム請求書(インフォマート)の
+// 「アップロードフォーマット設定 → 請求書(自社作成)データ」に取り込むCSVを作る。
 //
-// 列は30列。前半(1〜14)が請求書1件ぶん、後半(15〜30)が明細1行ぶん。
-// 先方のテンプレートは Shift_JIS だったので、出力もそれに合わせる
-// (UTF-8 で出すと取り込み時に文字化けする可能性がある)。
+// 列名は先方の [項目名] と同じ文字列にしてある (2026-09-25 に実画面の項目一覧で確認)。
+// フォーマット設定画面では「貴社データの番号」を項目に割り当てるので、
+// 同じ名前にしておくと対応付けで迷わない。
 //
-// 🚨 前半の請求書項目を「1行目だけに入れる」か「全行に繰り返す」かは、
-//    先方の仕様書が手元に無いため確認できていない。ここでは一般的な
-//    「1行目だけ」で出している。弾かれた場合は REPEAT_HEADER を true にする。
-//    (2026-09-25: 実データ1件で通るか試す前提で実装)
-const REPEAT_HEADER = false;
+// 先方の項目には 伝票情報・軽減8%/8%/5%/0%/非課税/免税/不課税 の内訳や
+// 宛先コード・社員コード・顧客コード・EDI情報などもあるが、
+// アスクルの請求は「10%課税のみ・伝票なし」なので出していない (割り当てなしでよい)。
+//
+// 🚨 Shift_JIS で出す (UTF-8 だと取り込みで文字化けする)。日付は YYYY/MM/DD。
+//
+// おもて情報は全行に繰り返す。 支払先コード と おもての請求金額 が必須項目で、
+// 行ごとに項目を割り当てる形式のため、 2行目以降が空だと弾かれる可能性が高い。
+// (1行目だけにする形式だった場合は REPEAT_HEADER を false にする)
+const REPEAT_HEADER = true;
+
+// 適格請求書発行事業者 登録番号 (株式会社NELTEC)
+export const NELTEC_REGISTRATION_NO = 'T8011601022911';
 
 export const BTOB_COLUMNS = [
-  '請求書番号', '発行先コード', '件名', '入金期限', '前回請求金額', '入金額', '調整金額', '繰越金額',
-  '今回請求金額（税抜）', '今回消費税額', '今回請求金額（税込）', 'おもての請求金額', '締日', '備考',
-  '明細日付', '明細番号', '商品コード', '明細項目', '数量', '単価', '単位', '金額', '消費税額', '請求金額',
+  // ── おもて情報 ──
+  '請求書番号', '支払先コード', '事業者登録番号', '件名', '支払期限',
+  '前回請求金額', '入金額', '調整金額', '繰越金額',
+  '今回請求金額（税抜）', '今回消費税額', '今回請求金額（税込）', 'おもての請求金額',
+  '10%請求金額（税抜）', '10%消費税額', '10%請求金額（税込）',
+  '締日', '備考',
+  // ── 明細情報 ──
+  '明細日付', '明細番号', '商品コード', '明細項目', '数量', '単価', '単位',
+  '金額', '消費税額', '請求金額',
   '税区分（課税／非課税／免税／不課税）', '税率', '税額入力形式（税抜／税込／手入力）',
-  '部門コード', '部門名', '備考',
+  '部門コード', '部門名', '明細備考',
 ] as const;
+
+/** おもて情報の列数 (明細だけ差し替える時の境目) */
+const HEADER_COLS = 18;
 
 export interface BtobInvoiceHeader {
   invoiceNo: string;      // 請求書番号
-  partnerCode: string;    // 発行先コード (BtoBプラットフォーム側の取引先コード)
+  partnerCode: string;    // 支払先コード (BtoBプラットフォーム側の支払先マスタのコード)
   subject: string;        // 件名
-  dueDate: string;        // 入金期限 (YYYY/MM/DD)
-  closingDate: string;    // 締日 (YYYY/MM/DD)
+  dueDate: string;        // 支払期限 (YYYY-MM-DD / YYYY/MM/DD)
+  closingDate: string;    // 締日
   note?: string;          // 備考
+  registrationNo?: string; // 事業者登録番号 (既定=NELTEC)
 }
 
 export interface BtobInvoiceLine {
-  date: string;           // 明細日付 (YYYY/MM/DD)
+  date: string;           // 明細日付
   productCode?: string;   // 商品コード (先方マスタ。無ければ空)
   item: string;           // 明細項目
   quantity: number;
@@ -54,17 +73,21 @@ const esc = (v: string | number | undefined | null): string => {
   return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 };
 
-/** 30列ぶんの配列を作る。ヘッダ項目を載せるかは withHeader で切り替える。 */
-function row(h: BtobInvoiceHeader, totals: { net: number; tax: number; gross: number }, l: BtobInvoiceLine, withHeader: boolean): string[] {
+interface Totals { net: number; tax: number; gross: number }
+
+/** 1行ぶん(おもて + 明細)を作る。おもてを載せるかは withHeader で切り替える。 */
+function row(h: BtobInvoiceHeader, t: Totals, l: BtobInvoiceLine, withHeader: boolean): string[] {
   const head = withHeader
     ? [
-        h.invoiceNo, h.partnerCode, h.subject, ymd(h.dueDate),
-        '0', '0', '0', '0',                                  // 繰越は使わない (前回請求/入金/調整/繰越)
-        String(totals.net), String(totals.tax), String(totals.gross),
-        String(totals.gross),                                // おもての請求金額
+        h.invoiceNo, h.partnerCode, h.registrationNo ?? NELTEC_REGISTRATION_NO,
+        h.subject, ymd(h.dueDate),
+        '0', '0', '0', '0',                    // 前回請求/入金/調整/繰越 (繰越は使わない)
+        String(t.net), String(t.tax), String(t.gross),
+        String(t.gross),                       // おもての請求金額 (必須)
+        String(t.net), String(t.tax), String(t.gross), // 10% の内訳 (全額10%課税)
         ymd(h.closingDate), h.note ?? '',
       ]
-    : ['', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+    : new Array(HEADER_COLS).fill('');
   return [
     ...head,
     ymd(l.date), '', l.productCode ?? '', l.item,
@@ -80,14 +103,14 @@ function row(h: BtobInvoiceHeader, totals: { net: number; tax: number; gross: nu
  * 合計は明細の積み上げにする(おもての金額と内訳が必ず一致するように)。
  */
 export function buildBtobInvoiceCsv(header: BtobInvoiceHeader, lines: BtobInvoiceLine[]): string {
-  const totals = lines.reduce(
+  const totals = lines.reduce<Totals>(
     (acc, l) => ({ net: acc.net + l.amount, tax: acc.tax + l.tax, gross: acc.gross + l.amount + l.tax }),
     { net: 0, tax: 0, gross: 0 },
   );
   const out: string[] = [BTOB_COLUMNS.map(esc).join(',')];
   lines.forEach((l, i) => {
     const cells = row(header, totals, l, REPEAT_HEADER || i === 0);
-    cells[15] = String(i + 1); // 明細番号
+    cells[HEADER_COLS + 1] = String(i + 1); // 明細番号
     out.push(cells.map(esc).join(','));
   });
   return out.join('\r\n') + '\r\n';
@@ -100,7 +123,7 @@ export function toShiftJisBlob(csv: string): Blob {
 }
 
 /**
- * 入金期限。BtoBプラットフォームの発行先設定に合わせて締日から出す。
+ * 支払期限。BtoBプラットフォームの支払先設定に合わせて締日から出す。
  *   20日締め  → 1ヵ月後の20日   (設定1)
  *   末日締め  → 1ヵ月後の末日   (設定2)
  * 締日が月末なら翌月末、そうでなければ翌月の同じ日 (その月に無い日は月末に丸める)。

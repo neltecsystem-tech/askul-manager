@@ -1894,7 +1894,7 @@ function BtobCsvModal({
   const remembered = (k: string, fallback: string) => {
     try { return localStorage.getItem('btob-' + k) ?? fallback; } catch { return fallback; }
   };
-  // BtoBプラットフォームに登録済みの発行先コード (ASKUL LOGIST 株式会社)
+  // BtoBプラットフォームに登録済みの支払先コード (ASKUL LOGIST 株式会社)
   const [partnerCode, setPartnerCode] = useState(() => remembered('partnerCode', '10001'));
   const [productCode, setProductCode] = useState(() => remembered('productCode', ''));
   const [invoiceNo, setInvoiceNo] = useState(() => defaultInvoiceNo(closingDate));
@@ -1956,9 +1956,9 @@ function BtobCsvModal({
         </div>
 
         {field('請求書番号', invoiceNo, setInvoiceNo)}
-        {field('発行先コード（BtoBプラットフォーム側の取引先コード）', partnerCode, setPartnerCode, '先方から指定された番号')}
+        {field('支払先コード（BtoBプラットフォーム側の支払先マスタのコード・必須）', partnerCode, setPartnerCode, '先方から指定された番号')}
         {field('件名', subject, setSubject)}
-        {field('入金期限（締日の1ヵ月後。BtoB側の発行先設定に合わせています）', dueDate, setDueDate, '', 'date')}
+        {field('支払期限（締日の1ヵ月後。BtoB側の支払先設定に合わせています）', dueDate, setDueDate, '', 'date')}
         {field('商品コード（任意・全明細に同じものを入れます）', productCode, setProductCode, '空欄でも可')}
 
         <div style={{ background: '#f8fafc', borderRadius: 6, padding: 12, fontSize: 13, marginBottom: 14 }}>
@@ -1970,7 +1970,7 @@ function BtobCsvModal({
 
         {!partnerCode && (
           <div style={{ fontSize: 12, color: '#b45309', marginBottom: 12 }}>
-            ⚠ 発行先コードが空です。BtoBプラットフォームの発行先設定にある番号を入れてください。
+            ⚠ 支払先コードが空です。BtoBプラットフォームの支払先設定にある番号を入れてください。
           </div>
         )}
 
