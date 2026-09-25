@@ -99,6 +99,25 @@ export function toShiftJisBlob(csv: string): Blob {
   return new Blob([new Uint8Array(sjis)], { type: 'text/csv' });
 }
 
+/**
+ * 入金期限。BtoBプラットフォームの発行先設定に合わせて締日から出す。
+ *   20日締め  → 1ヵ月後の20日   (設定1)
+ *   末日締め  → 1ヵ月後の末日   (設定2)
+ * 締日が月末なら翌月末、そうでなければ翌月の同じ日 (その月に無い日は月末に丸める)。
+ */
+export function dueDateFromClosing(closingDate: string): string {
+  const d = new Date(closingDate);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const day = d.getDate();
+  const lastOfThis = new Date(y, m + 1, 0).getDate();
+  const lastOfNext = new Date(y, m + 2, 0).getDate();
+  const target = day === lastOfThis ? lastOfNext : Math.min(day, lastOfNext);
+  const due = new Date(y, m + 1, target);
+  return `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
+}
+
 /** 請求書番号。締め年月 + 通し記号。同じ月を作り直しても同じ番号になるようにする。 */
 export function defaultInvoiceNo(closingDate: string, prefix = 'AS'): string {
   const d = new Date(closingDate);
