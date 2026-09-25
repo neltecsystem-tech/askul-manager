@@ -1362,6 +1362,14 @@ function BulkDocumentsView({
   onFinalize?: () => void | Promise<void>;
   finalizing?: boolean;
 }) {
+  // 🚨 請求が0円の人は請求書から外す。稼働はあるが請求対象の売上が立っていない
+  //    ドライバーがいて、中身が全部0の請求書が混ざっていた(2026-09-25 指摘)。
+  //    支払いは発生しているので、支払明細のほうは全員ぶん作る。
+  const docs = useMemo(
+    () => (mode === 'invoice' ? aggregates.filter((a) => Math.round(a.invoice_revenue * 1.1) > 0) : aggregates),
+    [mode, aggregates],
+  );
+
   const toDate = new Date(to);
   const reiwaYear = toDate.getFullYear() - 2018;
   const closingMonth = toDate.getMonth() + 1;
@@ -1424,9 +1432,9 @@ function BulkDocumentsView({
     try {
       const zip = new JSZip();
       const folder = zip.folder(folderName);
-      const n = aggregates.length;
+      const n = docs.length;
       for (let i = 0; i < n; i++) {
-        const agg = aggregates[i];
+        const agg = docs[i];
         setProgress(`${i + 1}/${n}: ${agg.driver_name}`);
         const page1 = pageEls[i];
         const page2 = mode === 'payment' ? pageEls[i + n] : null;
@@ -1452,9 +1460,9 @@ function BulkDocumentsView({
     setGenerating(true);
     try {
       const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-      const n = aggregates.length;
+      const n = docs.length;
       for (let i = 0; i < n; i++) {
-        const agg = aggregates[i];
+        const agg = docs[i];
         setProgress(`${i + 1}/${n}: ${agg.driver_name}`);
         const page1 = pageEls[i];
         const page2 = mode === 'payment' ? pageEls[i + n] : null;
@@ -1477,7 +1485,7 @@ function BulkDocumentsView({
       <style>{printCss}</style>
       <div style={bulkStyle.header} className="no-print">
         <div style={{ fontWeight: 600 }}>
-          {mode === 'invoice' ? '請求書' : '支払い明細'} ({aggregates.length}件)
+          {mode === 'invoice' ? '請求書' : '支払い明細'} ({docs.length}件)
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {progress && (
@@ -1493,13 +1501,13 @@ function BulkDocumentsView({
               {finalizing ? '確定中...' : '✔ 支払明細書を確定'}
             </button>
           )}
-          <button style={btnPrimary} onClick={downloadMergedPdf} disabled={generating}>
-            {generating ? '生成中...' : `1つのPDFにまとめる (${aggregates.length}ページ)`}
+          <button style={btnPrimary} onClick={downloadMergedPdf} disabled={generating || docs.length === 0}>
+            {generating ? '生成中...' : `1つのPDFにまとめる (${docs.length}ページ)`}
           </button>
-          <button style={btn} onClick={downloadIndividualPdfs} disabled={generating}>
-            {generating ? '生成中...' : `ZIPで個別ダウンロード (${aggregates.length}ファイル)`}
+          <button style={btn} onClick={downloadIndividualPdfs} disabled={generating || docs.length === 0}>
+            {generating ? '生成中...' : `ZIPで個別ダウンロード (${docs.length}ファイル)`}
           </button>
-          <button style={btn} onClick={() => window.print()} disabled={generating}>
+          <button style={btn} onClick={() => window.print()} disabled={generating || docs.length === 0}>
             まとめて印刷
           </button>
           <button style={btn} onClick={onClose} disabled={generating}>
@@ -1508,7 +1516,12 @@ function BulkDocumentsView({
         </div>
       </div>
       <div style={bulkStyle.pages} ref={pagesRef}>
-        {aggregates.map((agg) => {
+        {docs.length === 0 && (
+          <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
+            請求額が0円のドライバーしかいないため、請求書はありません。
+          </div>
+        )}
+        {docs.map((agg) => {
           const profile = profiles.find((p) => normalizeDriverName(p.full_name) === normalizeDriverName(agg.driver_name)) ?? null;
           const officeName = offices.find((o) => o.id === profile?.office_id)?.name ?? '杉並営業所';
           // mode によって参照する rows が違う:
@@ -1698,7 +1711,7 @@ function BulkDocumentsView({
 
         {/* 支払い明細モードのときは、各ドライバーの件数明細ページ(page2)も追加 */}
         {mode === 'payment' &&
-          aggregates.map((agg) => {
+          docs.map((agg) => {
             const profile = profiles.find((p) => normalizeDriverName(p.full_name) === normalizeDriverName(agg.driver_name)) ?? null;
             const officeName = offices.find((o) => o.id === profile?.office_id)?.name ?? '杉並営業所';
             return (
