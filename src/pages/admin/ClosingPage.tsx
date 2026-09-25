@@ -9,6 +9,7 @@ import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import {
   buildBtobInvoiceCsv, toShiftJisBlob, defaultInvoiceNo, dueDateFromClosing,
+  type BtobBank,
   type BtobInvoiceLine,
 } from '../../lib/btobInvoiceCsv';
 
@@ -1873,8 +1874,9 @@ const modalStyle = {
 
 // ── BtoBプラットフォーム(インフォマート)への取り込み用CSV ────────────────
 // 1請求書(アスクル宛) + 明細はドライバーごとに1行。請求が0円の人は入れない。
-// 🚨 発行先コード・商品コードは先方マスタの番号なのでこちらでは作れない。
+// 🚨 支払先コード・商品コードは先方マスタの番号なのでこちらでは作れない。
 //    入力してもらい、次回のために端末に覚えさせる(共有設定ではない)。
+// 🚨 振込先(口座)は 公開リポジトリに書けないので billing_settings から読む。
 function BtobCsvModal({
   aggregates,
   from,
@@ -1899,8 +1901,25 @@ function BtobCsvModal({
   const [productCode, setProductCode] = useState(() => remembered('productCode', ''));
   const [invoiceNo, setInvoiceNo] = useState(() => defaultInvoiceNo(closingDate));
   const [subject, setSubject] = useState(`令和${reiwaYear}年${closingMonth}月度 配送業務委託料`);
-  // 発行先設定「20日締め → 1ヵ月後の20日」から自動で入れる (直せる)
+  // 支払先設定「20日締め → 1ヵ月後の20日」から自動で入れる (直せる)
   const [dueDate, setDueDate] = useState(() => dueDateFromClosing(closingDate));
+
+  // 振込先(口座情報)。 管理者のみ読める billing_settings に入っている。
+  // 読めなかったら空欄のまま出す (誤った口座を載せるより空の方が安全)
+  const [bank, setBank] = useState<BtobBank | null>(null);
+  const [bankError, setBankError] = useState<string | null>(null);
+  useEffect(() => {
+    supabase
+      .from('billing_settings')
+      .select('value')
+      .eq('key', 'btob_bank')
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) setBankError(error.message);
+        else if (data?.value) setBank(data.value as BtobBank);
+        else setBankError('振込先が登録されていません');
+      });
+  }, []);
 
   const lines: BtobInvoiceLine[] = useMemo(
     () =>
@@ -1933,7 +1952,11 @@ function BtobCsvModal({
       localStorage.setItem('btob-productCode', productCode);
     } catch { /* 端末に保存できなくても書き出しは続ける */ }
     const csv = buildBtobInvoiceCsv(
-      { invoiceNo, partnerCode, subject, dueDate, closingDate, note: `期間 ${from} 〜 ${to}` },
+      {
+        invoiceNo, partnerCode, subject, dueDate, closingDate,
+        note: `期間 ${from} 〜 ${to}`,
+        bank: bank ?? undefined,
+      },
       lines,
     );
     saveAs(toShiftJisBlob(csv), `請求書_${invoiceNo}.csv`);
@@ -1965,9 +1988,16 @@ function BtobCsvModal({
           明細 <b>{lines.length}</b> 件 ／ 請求合計（税込） <b>¥{total.toLocaleString()}</b>
           <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 6 }}>
             締日 {closingDate}／税率10%・課税・税抜入力／繰越は使いません（0で出力）
+            {bank && <><br />振込先 {bank.bankName} {bank.branchName} {bank.accountType} {bank.accountNo}</>}
           </div>
         </div>
 
+        {!bank && (
+          <div style={{ fontSize: 12, color: '#b45309', marginBottom: 12 }}>
+            ⚠ 振込先(口座情報)を読み込めませんでした{bankError ? `: ${bankError}` : ''}。
+            このまま書き出すと口座欄が空のCSVになります。
+          </div>
+        )}
         {!partnerCode && (
           <div style={{ fontSize: 12, color: '#b45309', marginBottom: 12 }}>
             ⚠ 支払先コードが空です。BtoBプラットフォームの支払先設定にある番号を入れてください。

@@ -24,6 +24,31 @@ export const NELTEC_REGISTRATION_NO = 'T8011601022911';
 // 請求書保存方式が「適格請求書等保存方式」または「フリーフォーマット」の場合は必須項目。
 export const NELTEC_BUSINESS_CLASS = '1';
 
+// 振込先 (請求書に載せる口座情報)。
+// 🚨 このリポジトリは公開なので、口座番号などをコードに書かない。
+//    実データは Supabase の billing_settings(key='btob_bank') に置き、
+//    管理者でログインしている画面から読んで渡す (RLS で管理者のみ読める)。
+//    読めなかった場合は空欄のまま出す (誤った口座を出すより空の方が安全)。
+export interface BtobBank {
+  code: string;            // 振込先コード (BtoB側の振込先マスタ。未設定なら空)
+  bankCode: string;
+  bankName: string;
+  bankNameKana: string;    // 半角カナ
+  branchCode: string;
+  branchName: string;
+  branchNameKana: string;  // 半角カナ
+  accountType: string;     // 預金種別 (普通預金/当座預金/貯蓄預金/その他)
+  accountNo: string;
+  accountName: string;
+  accountNameKana: string; // 半角カナ
+}
+
+export const EMPTY_BANK: BtobBank = {
+  code: '', bankCode: '', bankName: '', bankNameKana: '',
+  branchCode: '', branchName: '', branchNameKana: '',
+  accountType: '', accountNo: '', accountName: '', accountNameKana: '',
+};
+
 export const BTOB_COLUMNS = [
   // ── おもて情報 ──
   '請求書番号', '支払先コード', '事業者区分', '事業者登録番号', '件名', '支払期限',
@@ -31,6 +56,10 @@ export const BTOB_COLUMNS = [
   '今回請求金額（税抜）', '今回消費税額', '今回請求金額（税込）', 'おもての請求金額',
   '10%請求金額（税抜）', '10%消費税額', '10%請求金額（税込）',
   '締日', '備考',
+  // ── 振込先 ──
+  '振込先コード', '金融機関コード', '金融機関名', '金融機関名カナ',
+  '支店コード', '支店名', '支店名カナ',
+  '預金種別', '口座番号', '預金者名', '預金者名カナ',
   // ── 明細情報 ──
   '明細日付', '明細番号', '商品コード', '明細項目', '数量', '単価', '単位',
   '金額', '消費税額', '請求金額',
@@ -39,7 +68,7 @@ export const BTOB_COLUMNS = [
 ] as const;
 
 /** おもて情報の列数 (明細だけ差し替える時の境目) */
-const HEADER_COLS = 19;
+const HEADER_COLS = 30;
 
 export interface BtobInvoiceHeader {
   invoiceNo: string;      // 請求書番号
@@ -50,6 +79,7 @@ export interface BtobInvoiceHeader {
   note?: string;          // 備考
   registrationNo?: string;  // 事業者登録番号 (既定=NELTEC)
   businessClass?: string;   // 事業者区分 (既定=1 課税事業者)
+  bank?: BtobBank;          // 振込先 (省略時は空欄で出す)
 }
 
 export interface BtobInvoiceLine {
@@ -81,6 +111,7 @@ interface Totals { net: number; tax: number; gross: number }
 
 /** 1行ぶん(おもて + 明細)を作る。おもてを載せるかは withHeader で切り替える。 */
 function row(h: BtobInvoiceHeader, t: Totals, l: BtobInvoiceLine, withHeader: boolean): string[] {
+  const b = h.bank ?? EMPTY_BANK;
   const head = withHeader
     ? [
         h.invoiceNo, h.partnerCode,
@@ -92,6 +123,10 @@ function row(h: BtobInvoiceHeader, t: Totals, l: BtobInvoiceLine, withHeader: bo
         String(t.gross),                       // おもての請求金額 (必須)
         String(t.net), String(t.tax), String(t.gross), // 10% の内訳 (全額10%課税)
         ymd(h.closingDate), h.note ?? '',
+        // 振込先 (請求書1件に対して同じ内容)
+        b.code, b.bankCode, b.bankName, b.bankNameKana,
+        b.branchCode, b.branchName, b.branchNameKana,
+        b.accountType, b.accountNo, b.accountName, b.accountNameKana,
       ]
     : new Array(HEADER_COLS).fill('');
   return [
