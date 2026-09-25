@@ -152,6 +152,17 @@ interface FormRow { work_date: string; driver_name: string; type: string; amount
 function normalizeDriverName(n: unknown): string { return String(n ?? '').replace(/[\s　]+/g, ' ').trim(); }
 // 照合用キー: シート「石島 大」と profiles「石島大」を同一人物にする (空白を全部落とす)
 function driverNameKey(n: unknown): string { return String(n ?? '').replace(/[\s　]+/g, ''); }
+
+// 氏名 + 稼働日 から プロファイルを1件選ぶ (ClosingPage と同じ規則)。
+// 同姓同名が複数ある場合は valid_from/valid_to で期間を見て絞る。
+function pickProfile(profiles: any[], nameKey: string, workDate: string): any | undefined {
+  const cands = (profiles ?? []).filter((p: any) => driverNameKey(p.full_name) === nameKey);
+  if (cands.length <= 1) return cands[0];
+  const inRange = cands.filter((p: any) =>
+    (!p.valid_from || workDate >= p.valid_from) && (!p.valid_to || workDate <= p.valid_to));
+  if (inRange.length > 0) return inRange[0];
+  return cands.find((p: any) => p.active) ?? cands[0];
+}
 function mdKey(workDate: string): string { return workDate.slice(5); }
 function fmtDate(d: Date): string { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function normFormDate(s: string): string { const m = String(s).match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/); return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : String(s); }
@@ -244,7 +255,7 @@ Deno.serve(async (req) => {
       readSheet(saToken, 'DETA貼り付け', 'A2:P', 'UNFORMATTED_VALUE'),
       readSheet(saToken, 'フォームの回答 1', 'A2:G', 'FORMATTED_VALUE'),
       admin.from('vehicle_days').select('month, day, amount').eq('active', true),
-      admin.from('profiles').select('id, full_name, office_id, business_type, company_name, deduction_rate'),
+      admin.from('profiles').select('id, full_name, office_id, business_type, company_name, deduction_rate, active, valid_from, valid_to'),
       admin.from('offices').select('id, name'),
       admin.from('driver_deduction_rates').select('driver_id, effective_from, deduction_rate').order('effective_from'),
       admin.from('delivery_swaps').select('from_driver_name, to_driver_name, to_driver_code, period_from, period_to').is('reverted_at', null),
@@ -288,14 +299,15 @@ Deno.serve(async (req) => {
     for (const r of records) { if (!r.driver_code) continue; const k = driverNameKey(r.driver_name); if (k && !driverCodeByName.has(k)) driverCodeByName.set(k, r.driver_code); }
 
     const map = new Map<string, Agg>();
-    const ensure = (driverCode: string, driverName: string): Agg => {
+    const ensure = (driverCode: string, driverName: string, workDate: string): Agg => {
       const normName = normalizeDriverName(driverName);
       const nameKey = driverNameKey(driverName);
       const resolvedCode = driverCode || driverCodeByName.get(nameKey) || '';
-      const key = resolvedCode || nameKey;
+      // 稼働日で プロファイルを選び、 期間で分かれた同姓同名は別明細にする
+      const profile = pickProfile(profiles ?? [], nameKey, workDate);
+      const key = `${resolvedCode || nameKey}|${profile?.id ?? ''}`;
       let agg = map.get(key);
       if (!agg) {
-        const profile = (profiles ?? []).find((p: any) => driverNameKey(p.full_name) === nameKey);
         agg = {
           driver_code: resolvedCode, driver_name: profile?.full_name ?? normName, driver_id: profile?.id ?? null,
           deduction_rate: Number(profile?.deduction_rate ?? 0), deduction_amount: 0,
@@ -314,10 +326,10 @@ Deno.serve(async (req) => {
     const addBase = (agg: Agg, rate: number, amount: number) => { let m = baseByRateByAgg.get(agg); if (!m) { m = new Map(); baseByRateByAgg.set(agg, m); } m.set(rate, (m.get(rate) ?? 0) + amount); };
 
     for (const r of filtered) {
-      const aggInvoice = ensure(r.driver_code, r.driver_name);
+      const aggInvoice = ensure(r.driver_code, r.driver_name, r.work_date);
       aggInvoice.invoice_revenue += r.amount || 0;
       const rPay = applySwap(r);
-      const aggPay = ensure(rPay.driver_code, rPay.driver_name);
+      const aggPay = ensure(rPay.driver_code, rPay.driver_name, rPay.work_date);
       aggPay.rows.push(rPay);
       const vehAmount = vehicleDayMap.get(mdKey(rPay.work_date));
       if (vehAmount !== undefined) {
@@ -333,7 +345,7 @@ Deno.serve(async (req) => {
       for (const d of agg.vehicle_day_dates) { const amount = vehicleDayMap.get(mdKey(d)) ?? 0; agg.master_vehicle += amount; agg.revenue += amount; }
     }
     for (const f of filteredForm) {
-      const agg = ensure('', f.driver_name);
+      const agg = ensure('', f.driver_name, f.work_date);
       agg.formRows.push(f); agg.revenue += f.amount;
     }
     for (const a of map.values()) {

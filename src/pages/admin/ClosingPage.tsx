@@ -78,7 +78,24 @@ function driverNameKey(name: string | undefined | null): string {
   return (name ?? '').replace(/[\s　]+/g, '');
 }
 
+// 氏名 + 稼働日 から プロファイルを1件選ぶ。
+// 同姓同名が複数ある場合 (所属変更で期間を分けて登録した等) は valid_from/valid_to で絞る。
+// 例: 神尚 → 個人契約 の4名は 旧=〜2026-08-10 / 新=2026-08-11〜 で登録されている。
+function pickProfile(profiles: Profile[], nameKey: string, workDate: string): Profile | undefined {
+  const cands = profiles.filter((p) => driverNameKey(p.full_name) === nameKey);
+  if (cands.length <= 1) return cands[0];
+  const inRange = cands.filter(
+    (p) => (!p.valid_from || workDate >= p.valid_from) && (!p.valid_to || workDate <= p.valid_to),
+  );
+  if (inRange.length > 0) return inRange[0];
+  // 期間指定がどれにも当たらない場合は 有効なプロファイルを優先
+  return cands.find((p) => p.active) ?? cands[0];
+}
+
 interface DriverAggregate {
+  // 集計単位の一意キー。 同姓同名を期間で分けた場合 driver_code も表示名も同じになるため、
+  // 画面の選択・React key はこれを使う
+  key: string;
   driver_code: string;
   driver_name: string;
   driver_id: string | null;
@@ -276,18 +293,21 @@ export default function ClosingPage() {
     }
 
     const map = new Map<string, DriverAggregate>();
-    const ensure = (driverCode: string, driverName: string): DriverAggregate => {
+    const ensure = (driverCode: string, driverName: string, workDate: string): DriverAggregate => {
       const normName = normalizeDriverName(driverName);
       const nameKey = driverNameKey(driverName);
       // driver_code が空 (フォーム入力) なら逆引きで補完
       const resolvedCode = driverCode || driverCodeByName.get(nameKey) || '';
-      // key は driver_code を優先、 なければ照合用キー (= 空白の有無/数で別人扱いしない)
-      const key = resolvedCode || nameKey;
+      // シートのドライバー名は全角/半角スペース混在のため空白を落として照合。
+      // 稼働日も渡して、 期間で分かれた同姓同名から正しい方を選ぶ
+      const profile = pickProfile(profiles, nameKey, workDate);
+      // key は driver_code(なければ照合用キー) + プロファイル。
+      // 期間で分かれた同姓同名は別集計 = 別の支払明細になる
+      const key = `${resolvedCode || nameKey}|${profile?.id ?? ''}`;
       let agg = map.get(key);
       if (!agg) {
-        // シートのドライバー名は全角/半角スペース混在のため空白を落として照合
-        const profile = profiles.find((p) => driverNameKey(p.full_name) === nameKey);
         agg = {
+          key,
           driver_code: resolvedCode,
           // 表示はドライバー管理の氏名を優先 (無ければシートの名前を正規化して使う)
           driver_name: profile?.full_name ?? normName,
@@ -340,13 +360,13 @@ export default function ClosingPage() {
 
     for (const r of filtered) {
       // 請求書側 (アスクル原データ、 swap 影響なし): シート上の名前で集計
-      const aggInvoice = ensure(r.driver_code, r.driver_name);
+      const aggInvoice = ensure(r.driver_code, r.driver_name, r.work_date);
       aggInvoice.invoice_revenue += r.amount || 0;
       aggInvoice.invoice_rows.push(r);
 
       // 支払い側 (swap 適用後): 先ドライバーに振り替え
       const rPay = applySwap(r);
-      const aggPay = ensure(rPay.driver_code, rPay.driver_name);
+      const aggPay = ensure(rPay.driver_code, rPay.driver_name, rPay.work_date);
       aggPay.days.add(rPay.work_date);
       aggPay.count += 1;
       aggPay.quantity += rPay.quantity || 0;
@@ -375,7 +395,7 @@ export default function ClosingPage() {
     }
 
     for (const f of filteredForm) {
-      const agg = ensure('', f.driver_name);
+      const agg = ensure('', f.driver_name, f.work_date);
       agg.formRows.push(f);
       agg.days.add(f.work_date);
       agg.revenue += f.amount;
@@ -431,7 +451,7 @@ export default function ClosingPage() {
   }, [aggregates, employeeIds]);
 
   const selected = selectedDriver
-    ? aggregates.find((a) => (a.driver_code || a.driver_name) === selectedDriver)
+    ? aggregates.find((a) => a.key === selectedDriver)
     : null;
 
   const setPresetCycle = (offset: number) => {
@@ -748,7 +768,7 @@ export default function ClosingPage() {
                   // 売上(税抜) / 請求(税込): アスクル請求ベース (シートP列単純合計)
                   const displayRevenue = a.invoice_revenue;
                   const invoice = Math.round(displayRevenue * 1.1);
-                  const key = a.driver_code || a.driver_name;
+                  const key = a.key;
                   return (
                     <tr key={key}>
                       <td style={td}>
@@ -1627,7 +1647,7 @@ function BulkDocumentsView({
           const payment = totals.subtotal - deduction;
 
           return (
-            <div key={agg.driver_code || agg.driver_name} className="print-page" style={bulkStyle.page}>
+            <div key={agg.key} className="print-page" style={bulkStyle.page}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 12 }}>
                 <div>
                   <div style={{ fontSize: 18, fontWeight: 700 }}>
@@ -1749,7 +1769,7 @@ function BulkDocumentsView({
             const officeName = offices.find((o) => o.id === profile?.office_id)?.name ?? '杉並営業所';
             return (
               <div
-                key={(agg.driver_code || agg.driver_name) + '-matrix'}
+                key={agg.key + '-matrix'}
                 className="print-page"
                 style={bulkStyle.page}
               >

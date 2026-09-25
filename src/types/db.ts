@@ -22,6 +22,10 @@ export interface Profile {
   invoice_number: string | null;
   phone: string | null;
   must_change_password: boolean;
+  // 適用期間。 同姓同名を期間で分けて運用するため (未設定 = 制限なし)
+  // 例: 所属変更で 8/10 までの旧プロファイルと 8/11 からの新プロファイルを分ける
+  valid_from: string | null;
+  valid_to: string | null;
   created_at: string;
 }
 

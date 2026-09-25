@@ -70,6 +70,8 @@ interface EditDriver {
   monthly_salary: number;
   invoice_number: string;
   phone: string;
+  valid_from: string;
+  valid_to: string;
 }
 
 function todayStr(): string {
@@ -207,6 +209,8 @@ export default function DriversPage() {
         monthly_salary: editing.business_type === 'employee' ? editing.monthly_salary : 0,
         invoice_number: editing.invoice_number.trim() || null,
         phone: editing.phone.trim() || null,
+        valid_from: editing.valid_from || null,
+        valid_to: editing.valid_to || null,
       })
       .eq('id', editing.id);
     if (profileErr) {
@@ -363,6 +367,8 @@ export default function DriversPage() {
       monthly_salary: Number(p.monthly_salary ?? 0),
       invoice_number: (p as { invoice_number?: string | null }).invoice_number ?? '',
       phone: (p as { phone?: string | null }).phone ?? '',
+      valid_from: p.valid_from ?? '',
+      valid_to: p.valid_to ?? '',
     });
 
   // 一覧には「有効」だけを出す。無効(退任・契約終了)は下部の「無効一覧」に隔離し、そこから再有効化する。
@@ -907,6 +913,28 @@ export default function DriversPage() {
                   placeholder="例: 090-1234-5678"
                 />
                 <span style={{ fontSize: 11, color: '#6b7280' }}>統合明細ビューアで本人特定に使用 (ドライバーには非公開)</span>
+              </label>
+              <label style={labelStyle}>
+                適用期間 (同姓同名を期間で分ける場合のみ)
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="date"
+                    style={{ ...input, flex: 1 }}
+                    value={editing.valid_from}
+                    onChange={(e) => setEditing({ ...editing, valid_from: e.target.value })}
+                  />
+                  <span>〜</span>
+                  <input
+                    type="date"
+                    style={{ ...input, flex: 1 }}
+                    value={editing.valid_to}
+                    onChange={(e) => setEditing({ ...editing, valid_to: e.target.value })}
+                  />
+                </div>
+                <span style={{ fontSize: 11, color: '#6b7280' }}>
+                  空欄=制限なし。 所属変更などで同じ氏名を2件に分けたとき、 稼働日がこの期間に入る実績だけが
+                  このドライバーの支払明細になります (例: 旧所属=〜8/10 / 新所属=8/11〜)
+                </span>
               </label>
               <label
                 style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}

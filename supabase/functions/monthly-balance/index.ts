@@ -109,7 +109,7 @@ Deno.serve(async (req: Request) => {
     const [deliveryValues, formValues, profilesRes, vehicleDaysRes, ratesRes, swapsRes, closedRes] = await Promise.all([
       fetchSheet(DELIVERY_RANGE, gToken),
       fetchSheet(FORM_RANGE, gToken),
-      admin.from('profiles').select('id, full_name, deduction_rate, business_type, monthly_salary, active'),
+      admin.from('profiles').select('id, full_name, deduction_rate, business_type, monthly_salary, active, valid_from, valid_to'),
       admin.from('vehicle_days').select('month, day, amount').eq('active', true),
       admin.from('driver_deduction_rates').select('driver_id, effective_from, deduction_rate').order('effective_from'),
       admin.from('delivery_swaps').select('from_driver_name, to_driver_name, to_driver_code, period_from, period_to').is('reverted_at', null),
@@ -117,7 +117,7 @@ Deno.serve(async (req: Request) => {
     ]);
     const closedRowsAll = (closedRes.data ?? []) as { driver_id: string; payment_amount: number; deduction_amount: number; driver_snapshot: { business_type?: string | null } | null }[];
 
-    const profiles = (profilesRes.data ?? []) as { id: string; full_name: string; deduction_rate: number | null; business_type: string | null; monthly_salary: number | null; active: boolean }[];
+    const profiles = (profilesRes.data ?? []) as { id: string; full_name: string; deduction_rate: number | null; business_type: string | null; monthly_salary: number | null; active: boolean; valid_from: string | null; valid_to: string | null }[];
 
     // 🚨社員の確定明細は driver_payment に足さない。
     //   社員は下の employee_salary_total(月給)で計上済みのため、足すと二重計上になる
@@ -143,11 +143,23 @@ Deno.serve(async (req: Request) => {
     const rateRows = (ratesRes.data ?? []) as { driver_id: string; effective_from: string; deduction_rate: number }[];
     const swaps = (swapsRes.data ?? []) as { from_driver_name: string; to_driver_name: string; to_driver_code: string; period_from: string; period_to: string }[];
 
-    // 正規化名でプロファイル照合 (ClosingPage と統一)
-    const profileByName = new Map<string, { id: string; deduction_rate: number }>();
+    // 氏名(空白を落とす) + 稼働日 でプロファイル照合 (ClosingPage と統一)。
+    // 同姓同名が複数ある場合は valid_from/valid_to で期間を見て絞る
+    const profilesByName = new Map<string, typeof profiles>();
     for (const p of profiles) {
-      profileByName.set(driverNameKey(p.full_name), { id: p.id, deduction_rate: Number(p.deduction_rate ?? 0) });
+      const k = driverNameKey(p.full_name);
+      const arr = profilesByName.get(k) ?? [];
+      arr.push(p);
+      profilesByName.set(k, arr);
     }
+    const pickProfile = (nameKey: string, workDate: string) => {
+      const cands = profilesByName.get(nameKey) ?? [];
+      if (cands.length <= 1) return cands[0];
+      const hit = cands.filter((p) =>
+        (!p.valid_from || workDate >= p.valid_from) && (!p.valid_to || workDate <= p.valid_to));
+      if (hit.length > 0) return hit[0];
+      return cands.find((p) => p.active) ?? cands[0];
+    };
     const vehicleDayMap = new Map<string, number>();
     for (const v of vehicleDaysRows) vehicleDayMap.set(vdKey(Number(v.month), Number(v.day)), Number(v.amount));
     const rateHistoryByDriver = new Map<string, { effective_from: string; deduction_rate: number }[]>();
@@ -215,19 +227,20 @@ Deno.serve(async (req: Request) => {
       if (k && !driverCodeByName.has(k)) driverCodeByName.set(k, r.driver_code);
     }
 
-    const ensure = (map: Map<string, Agg>, code: string, name: string): Agg => {
+    const ensure = (map: Map<string, Agg>, code: string, name: string, workDate: string): Agg => {
       const normName = normalizeDriverName(name);
       const nameKey = driverNameKey(name);
       const resolvedCode = code || driverCodeByName.get(nameKey) || '';
-      const key = resolvedCode || nameKey;
+      const profile = pickProfile(nameKey, workDate);
+      // 期間で分かれた同姓同名は別集計にする
+      const key = `${resolvedCode || nameKey}|${profile?.id ?? ''}`;
       let a = map.get(key);
       if (!a) {
-        const profile = profileByName.get(nameKey);
         a = {
           driver_code: resolvedCode,
           driver_name: normName,
           driver_id: profile?.id ?? null,
-          deduction_rate: profile?.deduction_rate ?? 0,
+          deduction_rate: Number(profile?.deduction_rate ?? 0),
           deduction_amount: 0,
           revenue: 0,
           vehicle_day_dates: new Set(),
@@ -264,7 +277,7 @@ Deno.serve(async (req: Request) => {
     for (const r of deliveries) {
       revenue_invoice += r.amount || 0; // 請求側: シート原データそのまま
       const rPay = applySwap(r);        // 支払側: 先ドライバーに付け替え
-      const a = ensure(aggMap, rPay.driver_code, rPay.driver_name);
+      const a = ensure(aggMap, rPay.driver_code, rPay.driver_name, rPay.work_date);
       const vehAmount = vehicleDayMap.get(mdKey(rPay.work_date));
       if (vehAmount !== undefined) {
         a.vehicle_day_dates.add(rPay.work_date); // 車建日: 後段で日単位 1 回だけ加算 (控除対象外)
@@ -280,7 +293,7 @@ Deno.serve(async (req: Request) => {
       }
     }
     for (const f of forms) {
-      const a = ensure(aggMap, '', f.driver_name);
+      const a = ensure(aggMap, '', f.driver_name, f.work_date);
       a.revenue += f.amount; // フォームは全て車建扱い → 控除なし (ClosingPage と統一)
     }
     // 控除額: 率ごとに合算してから round
