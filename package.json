@@ -16,6 +16,7 @@
     "@turf/helpers": "^7.3.5",
     "@turf/union": "^7.3.5",
     "date-fns": "^4.1.0",
+    "encoding-japanese": "^2.4.0",
     "file-saver": "^2.0.5",
     "html2canvas": "^1.4.1",
     "japanese-holidays": "^1.0.10",

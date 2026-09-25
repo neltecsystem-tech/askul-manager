@@ -7,6 +7,10 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
+import {
+  buildBtobInvoiceCsv, toShiftJisBlob, defaultInvoiceNo,
+  type BtobInvoiceLine,
+} from '../../lib/btobInvoiceCsv';
 
 interface DeliveryRow {
   driver_code: string;
@@ -122,6 +126,8 @@ export default function ClosingPage() {
   const [selectedDriver, setSelectedDriver] = useState<string | null>(null);
   const [docMode, setDocMode] = useState<'invoice' | 'payment'>('invoice');
   const [bulkMode, setBulkMode] = useState<'invoice' | 'payment' | null>(null);
+  // BtoBプラットフォーム(インフォマート)への取り込み用CSV
+  const [btobOpen, setBtobOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
 
   const load = async () => {
@@ -616,6 +622,14 @@ export default function ClosingPage() {
             </button>
             <button
               style={btn}
+              onClick={() => setBtobOpen(true)}
+              disabled={loading || aggregates.length === 0}
+              title="BtoBプラットフォーム(インフォマート)へ取り込む請求書CSVを書き出します"
+            >
+              請求CSV (BtoB)
+            </button>
+            <button
+              style={btn}
               onClick={finalizePaymentStatements}
               disabled={loading || finalizing || aggregates.length === 0}
               title="現在の集計を支払明細書として確定保存し、各ドライバー/法人オーナーが閲覧できるようにします"
@@ -805,6 +819,14 @@ export default function ClosingPage() {
           profile={profiles.find((p) => normalizeDriverName(p.full_name) === normalizeDriverName(selected.driver_name)) ?? null}
           offices={offices}
           onClose={() => setSelectedDriver(null)}
+        />
+      )}
+      {btobOpen && (
+        <BtobCsvModal
+          aggregates={aggregates}
+          from={dateFrom}
+          to={dateTo}
+          onClose={() => setBtobOpen(false)}
         />
       )}
       {bulkMode && (
@@ -1817,3 +1839,115 @@ const modalStyle = {
     overflow: 'auto',
   },
 };
+
+// ── BtoBプラットフォーム(インフォマート)への取り込み用CSV ────────────────
+// 1請求書(アスクル宛) + 明細はドライバーごとに1行。請求が0円の人は入れない。
+// 🚨 発行先コード・商品コードは先方マスタの番号なのでこちらでは作れない。
+//    入力してもらい、次回のために端末に覚えさせる(共有設定ではない)。
+function BtobCsvModal({
+  aggregates,
+  from,
+  to,
+  onClose,
+}: {
+  aggregates: DriverAggregate[];
+  from: string;
+  to: string;
+  onClose: () => void;
+}) {
+  const closingDate = to;
+  const toDate = new Date(to);
+  const reiwaYear = toDate.getFullYear() - 2018;
+  const closingMonth = toDate.getMonth() + 1;
+
+  const remembered = (k: string, fallback: string) => {
+    try { return localStorage.getItem('btob-' + k) ?? fallback; } catch { return fallback; }
+  };
+  const [partnerCode, setPartnerCode] = useState(() => remembered('partnerCode', ''));
+  const [productCode, setProductCode] = useState(() => remembered('productCode', ''));
+  const [invoiceNo, setInvoiceNo] = useState(() => defaultInvoiceNo(closingDate));
+  const [subject, setSubject] = useState(`令和${reiwaYear}年${closingMonth}月度 配送業務委託料`);
+  const [dueDate, setDueDate] = useState('');
+
+  const lines: BtobInvoiceLine[] = useMemo(
+    () =>
+      aggregates
+        .map((a) => {
+          const net = Math.round(a.invoice_revenue);
+          const tax = Math.round(net * 0.1);
+          return { a, net, tax };
+        })
+        .filter((x) => x.net + x.tax > 0)
+        .map(({ a, net, tax }) => ({
+          date: closingDate,
+          productCode: productCode || undefined,
+          item: `配送業務 ${a.driver_name}${a.driver_code ? `(${a.driver_code})` : ''}`,
+          quantity: 1,
+          unitPrice: net,
+          unit: '式',
+          amount: net,
+          tax,
+          taxRate: 10,
+        })),
+    [aggregates, closingDate, productCode],
+  );
+
+  const total = lines.reduce((s, l) => s + l.amount + l.tax, 0);
+
+  const download = () => {
+    try {
+      localStorage.setItem('btob-partnerCode', partnerCode);
+      localStorage.setItem('btob-productCode', productCode);
+    } catch { /* 端末に保存できなくても書き出しは続ける */ }
+    const csv = buildBtobInvoiceCsv(
+      { invoiceNo, partnerCode, subject, dueDate, closingDate, note: `期間 ${from} 〜 ${to}` },
+      lines,
+    );
+    saveAs(toShiftJisBlob(csv), `請求書_${invoiceNo}.csv`);
+  };
+
+  const field = (label: string, value: string, set: (v: string) => void, ph = '', type = 'text') => (
+    <label style={{ display: 'block', marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 4 }}>{label}</div>
+      <input style={{ ...input, width: '100%' }} value={value} placeholder={ph} type={type}
+        onChange={(e) => set(e.target.value)} />
+    </label>
+  );
+
+  return (
+    <div style={modalStyle.overlay}>
+      <div style={{ ...modalStyle.modal, maxWidth: 560 }}>
+        <div style={{ fontSize: 17, fontWeight: 600, marginBottom: 4 }}>請求CSV (BtoBプラットフォーム)</div>
+        <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>
+          アスクル宛の請求書1件として書き出します。明細はドライバーごとに1行（請求が0円の人は入りません）。
+        </div>
+
+        {field('請求書番号', invoiceNo, setInvoiceNo)}
+        {field('発行先コード（BtoBプラットフォーム側の取引先コード）', partnerCode, setPartnerCode, '先方から指定された番号')}
+        {field('件名', subject, setSubject)}
+        {field('入金期限', dueDate, setDueDate, '', 'date')}
+        {field('商品コード（任意・全明細に同じものを入れます）', productCode, setProductCode, '空欄でも可')}
+
+        <div style={{ background: '#f8fafc', borderRadius: 6, padding: 12, fontSize: 13, marginBottom: 14 }}>
+          明細 <b>{lines.length}</b> 件 ／ 請求合計（税込） <b>¥{total.toLocaleString()}</b>
+          <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 6 }}>
+            締日 {closingDate}／税率10%・課税・税抜入力／繰越は使いません（0で出力）
+          </div>
+        </div>
+
+        {!partnerCode && (
+          <div style={{ fontSize: 12, color: '#b45309', marginBottom: 12 }}>
+            ⚠ 発行先コードが空です。先方の取り込みで弾かれる場合は、指定された番号を入れてください。
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button style={btnPrimary} onClick={download} disabled={lines.length === 0}>
+            CSVをダウンロード
+          </button>
+          <button style={btn} onClick={onClose}>閉じる</button>
+        </div>
+      </div>
+    </div>
+  );
+}
