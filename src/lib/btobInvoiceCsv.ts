@@ -87,7 +87,8 @@ export interface BtobInvoiceLine {
   productCode?: string;   // 商品コード (先方マスタ。無ければ空)
   item: string;           // 明細項目
   quantity: number;
-  unitPrice: number;
+  // 単価。 1明細の中で単価が混ざる(サイズ区分ごとに違う)場合は null にして空欄で出す
+  unitPrice: number | null;
   unit: string;           // 単位
   amount: number;         // 金額 (税抜)
   tax: number;            // 消費税額
@@ -132,7 +133,7 @@ function row(h: BtobInvoiceHeader, t: Totals, l: BtobInvoiceLine, withHeader: bo
   return [
     ...head,
     ymd(l.date), '', l.productCode ?? '', l.item,
-    String(l.quantity), String(l.unitPrice), l.unit,
+    String(l.quantity), l.unitPrice === null ? '' : String(l.unitPrice), l.unit,
     String(l.amount), String(l.tax), String(l.amount + l.tax),
     '課税', String(l.taxRate), '税抜',
     l.departmentCode ?? '', l.departmentName ?? '', l.note ?? '',
