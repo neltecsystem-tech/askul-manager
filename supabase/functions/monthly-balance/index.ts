@@ -67,6 +67,11 @@ function vdKey(month: number, day: number): string {
 function normalizeDriverName(name: string | undefined | null): string {
   return (name ?? '').replace(/[\s　]+/g, ' ').trim();
 }
+
+// 照合用キー: シート「石島 大」と profiles「石島大」を同一人物にする (空白を全部落とす)
+function driverNameKey(name: string | undefined | null): string {
+  return (name ?? '').replace(/[\s　]+/g, '');
+}
 // 特別日当 (フォーム入力) は種別問わず全て車建扱い (控除対象外) — ClosingPage と統一。
 // 旧ロジックは "個建" を含む種別に控除をかけていたが、 ClosingPage が全車建に変更済みのため追従。
 
@@ -141,7 +146,7 @@ Deno.serve(async (req: Request) => {
     // 正規化名でプロファイル照合 (ClosingPage と統一)
     const profileByName = new Map<string, { id: string; deduction_rate: number }>();
     for (const p of profiles) {
-      profileByName.set(normalizeDriverName(p.full_name), { id: p.id, deduction_rate: Number(p.deduction_rate ?? 0) });
+      profileByName.set(driverNameKey(p.full_name), { id: p.id, deduction_rate: Number(p.deduction_rate ?? 0) });
     }
     const vehicleDayMap = new Map<string, number>();
     for (const v of vehicleDaysRows) vehicleDayMap.set(vdKey(Number(v.month), Number(v.day)), Number(v.amount));
@@ -206,17 +211,18 @@ Deno.serve(async (req: Request) => {
     const driverCodeByName = new Map<string, string>();
     for (const r of deliveries) {
       if (!r.driver_code) continue;
-      const k = normalizeDriverName(r.driver_name);
+      const k = driverNameKey(r.driver_name);
       if (k && !driverCodeByName.has(k)) driverCodeByName.set(k, r.driver_code);
     }
 
     const ensure = (map: Map<string, Agg>, code: string, name: string): Agg => {
       const normName = normalizeDriverName(name);
-      const resolvedCode = code || driverCodeByName.get(normName) || '';
-      const key = resolvedCode || normName;
+      const nameKey = driverNameKey(name);
+      const resolvedCode = code || driverCodeByName.get(nameKey) || '';
+      const key = resolvedCode || nameKey;
       let a = map.get(key);
       if (!a) {
-        const profile = profileByName.get(normName);
+        const profile = profileByName.get(nameKey);
         a = {
           driver_code: resolvedCode,
           driver_name: normName,
@@ -234,7 +240,7 @@ Deno.serve(async (req: Request) => {
     // swap (振り替え) 適用: 該当行は driver_name/code を先ドライバーに書き換え (ClosingPage と統一)
     const applySwap = (r: DeliveryRow): DeliveryRow => {
       const swap = swaps.find((s) =>
-        normalizeDriverName(s.from_driver_name) === normalizeDriverName(r.driver_name) &&
+        driverNameKey(s.from_driver_name) === driverNameKey(r.driver_name) &&
         r.work_date >= s.period_from &&
         r.work_date <= s.period_to,
       );

@@ -69,6 +69,15 @@ function normalizeDriverName(name: string | undefined | null): string {
   return (name ?? '').replace(/[\s　]+/g, ' ').trim();
 }
 
+// 照合用キー。 空白を「1個に揃える」だけでは
+//   シート  : 「石島 大」(姓名の間にスペース)
+//   profiles: 「石島大」 (スペース無し)
+// が別人扱いになり、 同じ人が2行に割れる / 未登録扱いになる。 照合時は空白を全部落とす。
+// (表示は normalizeDriverName のまま = スペースは残す)
+function driverNameKey(name: string | undefined | null): string {
+  return (name ?? '').replace(/[\s　]+/g, '');
+}
+
 interface DriverAggregate {
   driver_code: string;
   driver_name: string;
@@ -262,24 +271,26 @@ export default function ClosingPage() {
     const driverCodeByName = new Map<string, string>();
     for (const r of records) {
       if (!r.driver_code) continue;
-      const k = normalizeDriverName(r.driver_name);
+      const k = driverNameKey(r.driver_name);
       if (k && !driverCodeByName.has(k)) driverCodeByName.set(k, r.driver_code);
     }
 
     const map = new Map<string, DriverAggregate>();
     const ensure = (driverCode: string, driverName: string): DriverAggregate => {
       const normName = normalizeDriverName(driverName);
+      const nameKey = driverNameKey(driverName);
       // driver_code が空 (フォーム入力) なら逆引きで補完
-      const resolvedCode = driverCode || driverCodeByName.get(normName) || '';
-      // key は driver_code を優先、 なければ正規化名 (= 空白の数違いで別人扱いしない)
-      const key = resolvedCode || normName;
+      const resolvedCode = driverCode || driverCodeByName.get(nameKey) || '';
+      // key は driver_code を優先、 なければ照合用キー (= 空白の有無/数で別人扱いしない)
+      const key = resolvedCode || nameKey;
       let agg = map.get(key);
       if (!agg) {
-        // シートのドライバー名は全角/半角スペース混在のため正規化して照合
-        const profile = profiles.find((p) => normalizeDriverName(p.full_name) === normName);
+        // シートのドライバー名は全角/半角スペース混在のため空白を落として照合
+        const profile = profiles.find((p) => driverNameKey(p.full_name) === nameKey);
         agg = {
           driver_code: resolvedCode,
-          driver_name: normName,  // 正規化済みで保存 (表示でも空白数のブレを解消)
+          // 表示はドライバー管理の氏名を優先 (無ければシートの名前を正規化して使う)
+          driver_name: profile?.full_name ?? normName,
           driver_id: profile?.id ?? null,
           deduction_rate: Number(profile?.deduction_rate ?? 0),
           deduction_amount: 0,
@@ -305,7 +316,7 @@ export default function ClosingPage() {
     // swap 適用: 該当する行は driver_name/code を 先ドライバーに書き換え (シートは触らない)
     const applySwap = (r: DeliveryRow): DeliveryRow => {
       const swap = swaps.find((s) =>
-        normalizeDriverName(s.from_driver_name) === normalizeDriverName(r.driver_name) &&
+        driverNameKey(s.from_driver_name) === driverNameKey(r.driver_name) &&
         r.work_date >= s.period_from &&
         r.work_date <= s.period_to,
       );

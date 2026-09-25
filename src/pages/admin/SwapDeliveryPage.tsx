@@ -21,6 +21,11 @@ function normalizeDriverName(name: string | undefined | null): string {
   return (name ?? '').replace(/[\s　]+/g, ' ').trim();
 }
 
+// 照合用キー (シート「石島 大」と profiles「石島大」を同一人物として扱う)
+function driverNameKey(name: string | undefined | null): string {
+  return (name ?? '').replace(/[\s　]+/g, '');
+}
+
 // ドライバー識別キー (同じ code で違う name のケースに対応するため code+name 合成)
 function driverKey(d: DriverOption): string {
   return `${d.driver_code}|${d.driver_name}`;
@@ -119,14 +124,14 @@ export default function SwapDeliveryPage() {
     const codeByName = new Map<string, string>();
     for (const r of records) {
       if (!r.driver_code) continue;
-      const k = normalizeDriverName(r.driver_name);
+      const k = driverNameKey(r.driver_name);
       if (k && !codeByName.has(k)) codeByName.set(k, r.driver_code);
     }
     return profiles
       .map((p) => {
         const normName = normalizeDriverName(p.full_name);
         return {
-          driver_code: codeByName.get(normName) ?? '',
+          driver_code: codeByName.get(driverNameKey(p.full_name)) ?? '',
           driver_name: normName,
         };
       })

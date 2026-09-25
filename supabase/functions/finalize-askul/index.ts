@@ -150,6 +150,8 @@ async function readSheet(saToken: string, sheetName: string, range: string, rend
 interface DeliveryRow { driver_code: string; driver_name: string; work_date: string; quantity: number; unit_price: number; amount: number; }
 interface FormRow { work_date: string; driver_name: string; type: string; amount: number; }
 function normalizeDriverName(n: unknown): string { return String(n ?? '').replace(/[\s　]+/g, ' ').trim(); }
+// 照合用キー: シート「石島 大」と profiles「石島大」を同一人物にする (空白を全部落とす)
+function driverNameKey(n: unknown): string { return String(n ?? '').replace(/[\s　]+/g, ''); }
 function mdKey(workDate: string): string { return workDate.slice(5); }
 function fmtDate(d: Date): string { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function normFormDate(s: string): string { const m = String(s).match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/); return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : String(s); }
@@ -283,18 +285,19 @@ Deno.serve(async (req) => {
     const filteredForm = formResponses.filter((f) => f.work_date && inRange(f.work_date));
 
     const driverCodeByName = new Map<string, string>();
-    for (const r of records) { if (!r.driver_code) continue; const k = normalizeDriverName(r.driver_name); if (k && !driverCodeByName.has(k)) driverCodeByName.set(k, r.driver_code); }
+    for (const r of records) { if (!r.driver_code) continue; const k = driverNameKey(r.driver_name); if (k && !driverCodeByName.has(k)) driverCodeByName.set(k, r.driver_code); }
 
     const map = new Map<string, Agg>();
     const ensure = (driverCode: string, driverName: string): Agg => {
       const normName = normalizeDriverName(driverName);
-      const resolvedCode = driverCode || driverCodeByName.get(normName) || '';
-      const key = resolvedCode || normName;
+      const nameKey = driverNameKey(driverName);
+      const resolvedCode = driverCode || driverCodeByName.get(nameKey) || '';
+      const key = resolvedCode || nameKey;
       let agg = map.get(key);
       if (!agg) {
-        const profile = (profiles ?? []).find((p: any) => normalizeDriverName(p.full_name) === normName);
+        const profile = (profiles ?? []).find((p: any) => driverNameKey(p.full_name) === nameKey);
         agg = {
-          driver_code: resolvedCode, driver_name: normName, driver_id: profile?.id ?? null,
+          driver_code: resolvedCode, driver_name: profile?.full_name ?? normName, driver_id: profile?.id ?? null,
           deduction_rate: Number(profile?.deduction_rate ?? 0), deduction_amount: 0,
           revenue: 0, invoice_revenue: 0, master_vehicle: 0,
           vehicle_day_dates: new Set(), vehicle_day_amounts: new Map(), rows: [], formRows: [],
@@ -304,7 +307,7 @@ Deno.serve(async (req) => {
       return agg;
     };
     const applySwap = (r: DeliveryRow): DeliveryRow => {
-      const swap = (swaps ?? []).find((s: any) => normalizeDriverName(s.from_driver_name) === normalizeDriverName(r.driver_name) && r.work_date >= s.period_from && r.work_date <= s.period_to);
+      const swap = (swaps ?? []).find((s: any) => driverNameKey(s.from_driver_name) === driverNameKey(r.driver_name) && r.work_date >= s.period_from && r.work_date <= s.period_to);
       return swap ? { ...r, driver_name: swap.to_driver_name, driver_code: swap.to_driver_code } : r;
     };
     const baseByRateByAgg = new Map<Agg, Map<number, number>>();
