@@ -20,10 +20,13 @@ const REPEAT_HEADER = true;
 
 // 適格請求書発行事業者 登録番号 (株式会社NELTEC)
 export const NELTEC_REGISTRATION_NO = 'T8011601022911';
+// 事業者区分 1:課税事業者 / 2:免税事業者。
+// 請求書保存方式が「適格請求書等保存方式」または「フリーフォーマット」の場合は必須項目。
+export const NELTEC_BUSINESS_CLASS = '1';
 
 export const BTOB_COLUMNS = [
   // ── おもて情報 ──
-  '請求書番号', '支払先コード', '事業者登録番号', '件名', '支払期限',
+  '請求書番号', '支払先コード', '事業者区分', '事業者登録番号', '件名', '支払期限',
   '前回請求金額', '入金額', '調整金額', '繰越金額',
   '今回請求金額（税抜）', '今回消費税額', '今回請求金額（税込）', 'おもての請求金額',
   '10%請求金額（税抜）', '10%消費税額', '10%請求金額（税込）',
@@ -36,7 +39,7 @@ export const BTOB_COLUMNS = [
 ] as const;
 
 /** おもて情報の列数 (明細だけ差し替える時の境目) */
-const HEADER_COLS = 18;
+const HEADER_COLS = 19;
 
 export interface BtobInvoiceHeader {
   invoiceNo: string;      // 請求書番号
@@ -45,7 +48,8 @@ export interface BtobInvoiceHeader {
   dueDate: string;        // 支払期限 (YYYY-MM-DD / YYYY/MM/DD)
   closingDate: string;    // 締日
   note?: string;          // 備考
-  registrationNo?: string; // 事業者登録番号 (既定=NELTEC)
+  registrationNo?: string;  // 事業者登録番号 (既定=NELTEC)
+  businessClass?: string;   // 事業者区分 (既定=1 課税事業者)
 }
 
 export interface BtobInvoiceLine {
@@ -79,7 +83,9 @@ interface Totals { net: number; tax: number; gross: number }
 function row(h: BtobInvoiceHeader, t: Totals, l: BtobInvoiceLine, withHeader: boolean): string[] {
   const head = withHeader
     ? [
-        h.invoiceNo, h.partnerCode, h.registrationNo ?? NELTEC_REGISTRATION_NO,
+        h.invoiceNo, h.partnerCode,
+        h.businessClass ?? NELTEC_BUSINESS_CLASS,
+        h.registrationNo ?? NELTEC_REGISTRATION_NO,
         h.subject, ymd(h.dueDate),
         '0', '0', '0', '0',                    // 前回請求/入金/調整/繰越 (繰越は使わない)
         String(t.net), String(t.tax), String(t.gross),
