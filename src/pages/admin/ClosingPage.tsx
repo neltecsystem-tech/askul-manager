@@ -1873,7 +1873,7 @@ const modalStyle = {
 };
 
 // ── BtoBプラットフォーム(インフォマート)への取り込み用CSV ────────────────
-// 1請求書(アスクル宛) + 明細はドライバー × 稼働日で1行。請求が0円の人は入れない。
+// 1請求書(アスクル宛) + 明細はドライバー × 稼働日 × 単価で1行。請求が0円の人は入れない。
 // 🚨 支払先コード・商品コードは先方マスタの番号なのでこちらでは作れない。
 //    入力してもらい、次回のために端末に覚えさせる(共有設定ではない)。
 // 🚨 振込先(口座)は 公開リポジトリに書けないので billing_settings から読む。
@@ -1929,15 +1929,24 @@ function BtobCsvModal({
         const tax = Math.round(net * 0.1);
         if (net + tax <= 0) continue;
 
-        // 明細はドライバー × 稼働日。 アスクル請求ベース(付け替えを適用しない invoice_rows)を日別に集計
-        const byDate = new Map<string, number>();
+        // 明細はドライバー × 稼働日 × 単価。 アスクル請求ベース(付け替えを適用しない invoice_rows)を集計。
+        // 同じ日でも単価が混ざる(¥201 と ¥100 など)ため、 単価ごとに分けないと
+        // 数量 × 単価 = 金額 が合わなくなる
+        const byDayPrice = new Map<string, { date: string; unitPrice: number; quantity: number; amount: number }>();
         for (const r of a.invoice_rows) {
           if (!r.work_date) continue;
-          byDate.set(r.work_date, (byDate.get(r.work_date) ?? 0) + (r.amount || 0));
+          const price = Number(r.unit_price) || 0;
+          const k = `${r.work_date}|${price}`;
+          const cur = byDayPrice.get(k) ?? { date: r.work_date, unitPrice: price, quantity: 0, amount: 0 };
+          cur.quantity += Number(r.quantity) || 0;
+          cur.amount += r.amount || 0;
+          byDayPrice.set(k, cur);
         }
-        const dates = [...byDate.keys()].filter((d) => (byDate.get(d) ?? 0) !== 0).sort();
+        const cells = [...byDayPrice.values()]
+          .filter((c) => c.amount !== 0)
+          .sort((x, y) => x.date.localeCompare(y.date) || y.unitPrice - x.unitPrice);
         // 日付が取れない場合だけ 締日で1行にまとめる (0行になって請求が消えるのを防ぐ)
-        if (dates.length === 0) {
+        if (cells.length === 0) {
           out.push({
             date: closingDate, productCode: productCode || undefined,
             item: `配送業務 ${a.driver_name}${a.driver_code ? `(${a.driver_code})` : ''}`,
@@ -1949,18 +1958,20 @@ function BtobCsvModal({
         // 消費税は これまで通り「ドライバー単位で四捨五入」した額を崩さない。
         // 日別に按分し、 端数は最終日で調整する (請求総額が日別化の前後で変わらないように)
         let taxLeft = tax;
-        dates.forEach((d, i) => {
-          const amount = byDate.get(d) ?? 0;
-          const t = i === dates.length - 1 ? taxLeft : Math.round(amount * 0.1);
+        cells.forEach((c, i) => {
+          const t = i === cells.length - 1 ? taxLeft : Math.round(c.amount * 0.1);
           taxLeft -= t;
+          // 数量 × 単価 が 金額 に一致するときだけ「個」で出す。
+          // 元データに端数などで合わない行があった場合は 金額の方を正として 1式 で出す
+          const exact = c.quantity > 0 && c.quantity * c.unitPrice === c.amount;
           out.push({
-            date: d,
+            date: c.date,
             productCode: productCode || undefined,
             item: `配送業務 ${a.driver_name}${a.driver_code ? `(${a.driver_code})` : ''}`,
-            quantity: 1,
-            unitPrice: amount,
-            unit: '式',
-            amount,
+            quantity: exact ? c.quantity : 1,
+            unitPrice: exact ? c.unitPrice : c.amount,
+            unit: exact ? '個' : '式',
+            amount: c.amount,
             tax: t,
             taxRate: 10,
           });
@@ -2002,7 +2013,7 @@ function BtobCsvModal({
       <div style={{ ...modalStyle.modal, maxWidth: 560 }}>
         <div style={{ fontSize: 17, fontWeight: 600, marginBottom: 4 }}>請求CSV (BtoBプラットフォーム)</div>
         <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>
-          アスクル宛の請求書1件として書き出します。明細はドライバー×稼働日で1行（請求が0円の人は入りません）。
+          アスクル宛の請求書1件として書き出します。明細はドライバー×稼働日×単価で1行（請求が0円の人は入りません）。
         </div>
 
         {field('請求書番号', invoiceNo, setInvoiceNo)}
