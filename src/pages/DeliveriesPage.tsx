@@ -538,7 +538,7 @@ function AppendModal({
                 style={btn}
                 onClick={goToRoot}
                 title="請求データフォルダに戻る"
-                disabled={currentFolder?.id === '1exUIPO7JtWVKJrzFAk-Zp2ug8dDL3blt'}
+                disabled={!rootFolderUrl || rootFolderUrl.endsWith(currentFolder?.id ?? ' ')}
               >
                 🏠 ルート
               </button>
