@@ -1917,9 +1917,17 @@ function BtobCsvModal({
     const d = new Date(closingDate);
     supabase.functions
       .invoke('parking-advance', { body: { year: d.getFullYear(), month: d.getMonth() + 1 } })
-      .then(({ data, error }) => {
-        if (error) setAdvanceError(error.message);
-        else setAdvance(data);
+      .then(async ({ data, error }) => {
+        if (!error) { setAdvance(data); return; }
+        // invoke は 2xx 以外だと本文を捨てるので、 レスポンスから理由を取り出す
+        let detail = error.message;
+        const res = (error as { context?: Response }).context;
+        try {
+          const body = await res?.clone().json();
+          if (body?.error) detail = String(body.error);
+          else if (body?.message) detail = String(body.message);
+        } catch { /* 本文が読めなければ message のまま出す */ }
+        setAdvanceError(detail);
       });
   }, [closingDate]);
   const advanceTotal = useAdvance && advance?.found ? (advance.total ?? 0) : 0;

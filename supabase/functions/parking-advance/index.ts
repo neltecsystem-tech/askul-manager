@@ -82,11 +82,19 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** シリアル値/文字列の日付を YYYY-MM-DD にする */
+/** Date / シリアル値 / 文字列 の日付を YYYY-MM-DD にする */
+function ymd(y: number, m: number, d: number): string {
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
 function toDate(v: unknown): string {
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    return ymd(v.getUTCFullYear(), v.getUTCMonth() + 1, v.getUTCDate());
+  }
   if (typeof v === 'number') {
-    const d = XLSX.SSF.parse_date_code(v);
-    if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+    // Excel のシリアル値 (1900年基準・1900閏年バグ込み)。XLSX.SSF に頼らず自前で出す
+    const ms = Math.round((v - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    if (!Number.isNaN(d.getTime())) return ymd(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
   }
   const s = String(v ?? '').trim();
   const m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
@@ -154,7 +162,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: `立替金精算書を読めませんでした (${res.status})`, detail: await res.text() }, 502);
     }
     const buf = new Uint8Array(await res.arrayBuffer());
-    const wb = XLSX.read(buf, { type: 'array' });
+    const wb = XLSX.read(buf, { type: 'array', cellDates: true });
 
     // 「2026年9月度駐車代清算金」形式と「202509」形式が混在している。
     // 同じ月に当たるシートが2枚あったら、 どちらが正か決められないので止める
@@ -224,6 +232,8 @@ Deno.serve(async (req: Request) => {
       totalMatches: sheetTotal === null ? null : sheetTotal === total,
     });
   } catch (e) {
-    return json({ error: String(e) }, 500);
+    // 画面には error の本文しか出ないので、 原因が分かる形で返す + ログにも残す
+    console.error('parking-advance failed:', e);
+    return json({ error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) }, 500);
   }
 });
