@@ -316,8 +316,11 @@ type Cell = string | number;
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const FOLDER_LS_KEY = 'askul-manager:last-drive-folder';
-const ROOT_FOLDER_URL =
-  'https://drive.google.com/drive/folders/1exUIPO7JtWVKJrzFAk-Zp2ug8dDL3blt';
+// 🚨 ドライブのフォルダIDはコードに書かない。
+//    このリポジトリは PUBLIC で ビルド済みJSも誰でも取得できるため、
+//    IDを書くとフォルダのリンクを公開するのと同じになる。
+//    ログイン後に app_settings(key='delivery_root_folder') から読む。
+const folderUrl = (id: string) => `https://drive.google.com/drive/folders/${id}`;
 
 // URL/ID から folder_id 抽出
 function extractFolderId(input: string): string {
@@ -335,9 +338,9 @@ function AppendModal({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [folderInput, setFolderInput] = useState(
-    () => localStorage.getItem(FOLDER_LS_KEY) ?? ROOT_FOLDER_URL,
-  );
+  const [folderInput, setFolderInput] = useState(() => localStorage.getItem(FOLDER_LS_KEY) ?? '');
+  // 既定(ルート)フォルダ。 DBから読むまでは空
+  const [rootFolderUrl, setRootFolderUrl] = useState('');
   const [currentFolder, setCurrentFolder] = useState<DriveFolderMeta | null>(null);
   const [history, setHistory] = useState<DriveFolderMeta[]>([]); // breadcrumb
   const [files, setFiles] = useState<DriveFile[]>([]);
@@ -375,7 +378,21 @@ function AppendModal({
   };
 
   useEffect(() => {
-    loadFolder(folderInput, true);
+    // 端末に前回のフォルダが残っていればそれを、 無ければ DB の既定フォルダを開く
+    supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'delivery_root_folder')
+      .maybeSingle()
+      .then(({ data }) => {
+        const id = (data?.value as { folderId?: string } | null)?.folderId ?? '';
+        if (id) setRootFolderUrl(folderUrl(id));
+        const start = folderInput || (id ? folderUrl(id) : '');
+        if (start) {
+          setFolderInput(start);
+          loadFolder(start, true);
+        }
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -404,8 +421,9 @@ function AppendModal({
   };
 
   const goToRoot = () => {
-    setFolderInput(ROOT_FOLDER_URL);
-    loadFolder(ROOT_FOLDER_URL, true);
+    if (!rootFolderUrl) return;
+    setFolderInput(rootFolderUrl);
+    loadFolder(rootFolderUrl, true);
   };
 
   const applyFolderInput = () => {

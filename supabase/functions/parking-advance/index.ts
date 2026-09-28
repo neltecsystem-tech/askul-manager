@@ -18,8 +18,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-// 立替金精算書ひな型 (アスクル管理の「立替金精算」タブが表示しているファイル)
-const FILE_ID = '1q_SnkywY-JXtx36Dvb9BQs1v-FBUR84H';
+// 立替金精算書ひな型 (アスクル管理の「立替金精算」タブが表示しているファイル)。
+// 🚨 このリポジトリは PUBLIC なので ファイルIDはコードに書かず app_settings から読む。
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 const SERVICE_ACCOUNT = JSON.parse(Deno.env.get('GOOGLE_SERVICE_ACCOUNT_KEY')!);
 
@@ -138,9 +138,16 @@ Deno.serve(async (req: Request) => {
     const month = Number(body.month);
     if (!year || !month) return json({ error: 'year / month が必要です' }, 400);
 
+    const { data: setting } = await admin
+      .from('app_settings').select('value').eq('key', 'expense_sheet').maybeSingle();
+    const fileId = (setting?.value as { fileId?: string } | null)?.fileId ?? '';
+    if (!fileId) {
+      return json({ error: '立替金精算書の場所が設定されていません (app_settings: expense_sheet)' }, 500);
+    }
+
     const accessToken = await getAccessToken();
     const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${FILE_ID}?alt=media&supportsAllDrives=true`,
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
     if (!res.ok) {
