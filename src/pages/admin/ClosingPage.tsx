@@ -1904,6 +1904,26 @@ function BtobCsvModal({
   // 支払先設定「20日締め → 1ヵ月後の20日」から自動で入れる (直せる)
   const [dueDate, setDueDate] = useState(() => dueDateFromClosing(closingDate));
 
+  // 立替金(駐車代)。 立替金精算書(Googleドライブのxlsx)の当月シートを EF 経由で読む。
+  // 実費なので 消費税は乗せない (不課税)。
+  interface AdvanceRow { date: string; description: string; payee: string; amount: number }
+  const [advance, setAdvance] = useState<{
+    found: boolean; sheetName?: string; rows?: AdvanceRow[]; total?: number;
+    sheetTotal?: number | null; totalMatches?: boolean | null; message?: string;
+  } | null>(null);
+  const [advanceError, setAdvanceError] = useState<string | null>(null);
+  const [useAdvance, setUseAdvance] = useState(true);
+  useEffect(() => {
+    const d = new Date(closingDate);
+    supabase.functions
+      .invoke('parking-advance', { body: { year: d.getFullYear(), month: d.getMonth() + 1 } })
+      .then(({ data, error }) => {
+        if (error) setAdvanceError(error.message);
+        else setAdvance(data);
+      });
+  }, [closingDate]);
+  const advanceTotal = useAdvance && advance?.found ? (advance.total ?? 0) : 0;
+
   // 振込先(口座情報)。 管理者のみ読める billing_settings に入っている。
   // 読めなかったら空欄のまま出す (誤った口座を載せるより空の方が安全)
   const [bank, setBank] = useState<BtobBank | null>(null);
@@ -1974,9 +1994,28 @@ function BtobCsvModal({
           });
         });
       }
+
+      // 立替金(駐車代)。 実費をそのまま 不課税で1行足す (消費税は乗せない)
+      if (useAdvance && advance?.found && (advance.total ?? 0) > 0) {
+        const rows = advance.rows ?? [];
+        const last = rows.length > 0 ? rows[rows.length - 1].date : closingDate;
+        const d = new Date(closingDate);
+        out.push({
+          date: last || closingDate,
+          item: `立替金 駐車場代 (${d.getFullYear()}年${d.getMonth() + 1}月度)`,
+          quantity: 1,
+          unitPrice: advance.total ?? 0,
+          unit: '式',
+          amount: advance.total ?? 0,
+          tax: 0,
+          taxRate: 0,
+          taxClass: '不課税',
+          note: rows.map((r) => `${r.date} ${r.payee}`).join(' / ').slice(0, 200),
+        });
+      }
       return out;
     },
-    [aggregates, closingDate, productCode],
+    [aggregates, closingDate, productCode, advance, useAdvance],
   );
 
   const total = lines.reduce((s, l) => s + l.amount + l.tax, 0);
@@ -2020,6 +2059,27 @@ function BtobCsvModal({
         {field('商品コード（任意・全明細に同じものを入れます）', productCode, setProductCode, '空欄でも可')}
 
         <div style={{ background: '#f8fafc', borderRadius: 6, padding: 12, fontSize: 13, marginBottom: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <input type="checkbox" checked={useAdvance} onChange={(e) => setUseAdvance(e.target.checked)}
+              disabled={!advance?.found} />
+            立替金（駐車場代）を請求に入れる
+            {advance?.found
+              ? <b>¥{(advance.total ?? 0).toLocaleString()}</b>
+              : <span style={{ color: '#b45309' }}>
+                  {advanceError ? `読めませんでした: ${advanceError}` : (advance?.message ?? '読み込み中…')}
+                </span>}
+          </label>
+          {advance?.found && (
+            <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 8 }}>
+              立替金精算書「{advance.sheetName}」{advance.rows?.length ?? 0}件 ／ 不課税（消費税は乗せません）
+              {advance.totalMatches === false && (
+                <div style={{ color: '#b91c1c' }}>
+                  ⚠ シートの総計 ¥{(advance.sheetTotal ?? 0).toLocaleString()} と
+                  読み取った合計 ¥{advanceTotal.toLocaleString()} が一致しません。シートを確認してください
+                </div>
+              )}
+            </div>
+          )}
           明細 <b>{lines.length}</b> 件 ／ 請求合計（税込） <b>¥{total.toLocaleString()}</b>
           <div style={{ fontSize: 11, color: colors.textMuted, marginTop: 6 }}>
             締日 {closingDate}／税率10%・課税・税抜入力／繰越は使いません（0で出力）

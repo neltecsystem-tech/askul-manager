@@ -55,6 +55,7 @@ export const BTOB_COLUMNS = [
   '前回請求金額', '入金額', '調整金額', '繰越金額',
   '今回請求金額（税抜）', '今回消費税額', '今回請求金額（税込）', 'おもての請求金額',
   '10%請求金額（税抜）', '10%消費税額', '10%請求金額（税込）',
+  '不課税請求金額（税抜）', '不課税消費税額', '不課税請求金額（税込）',
   '締日', '備考',
   // ── 振込先 ──
   '振込先コード', '金融機関コード', '金融機関名', '金融機関名カナ',
@@ -68,7 +69,7 @@ export const BTOB_COLUMNS = [
 ] as const;
 
 /** おもて情報の列数 (明細だけ差し替える時の境目) */
-const HEADER_COLS = 30;
+const HEADER_COLS = 33;
 
 export interface BtobInvoiceHeader {
   invoiceNo: string;      // 請求書番号
@@ -92,7 +93,9 @@ export interface BtobInvoiceLine {
   unit: string;           // 単位
   amount: number;         // 金額 (税抜)
   tax: number;            // 消費税額
-  taxRate: number;        // 税率 (10 など)
+  taxRate: number;        // 税率 (10 など)。不課税は 0
+  // 税区分。 立替金(駐車場代の実費)は 消費税を乗せないので '不課税'
+  taxClass?: '課税' | '不課税';
   departmentCode?: string;
   departmentName?: string;
   note?: string;
@@ -109,9 +112,12 @@ const esc = (v: string | number | undefined | null): string => {
 };
 
 interface Totals { net: number; tax: number; gross: number }
+/** 税区分ごとの内訳。 おもての「10%…」「不課税…」欄に入れる */
+interface Breakdown { taxed: Totals; untaxed: Totals }
+const zero = (): Totals => ({ net: 0, tax: 0, gross: 0 });
 
 /** 1行ぶん(おもて + 明細)を作る。おもてを載せるかは withHeader で切り替える。 */
-function row(h: BtobInvoiceHeader, t: Totals, l: BtobInvoiceLine, withHeader: boolean): string[] {
+function row(h: BtobInvoiceHeader, t: Totals, bd: Breakdown, l: BtobInvoiceLine, withHeader: boolean): string[] {
   const b = h.bank ?? EMPTY_BANK;
   const head = withHeader
     ? [
@@ -122,7 +128,8 @@ function row(h: BtobInvoiceHeader, t: Totals, l: BtobInvoiceLine, withHeader: bo
         '0', '0', '0', '0',                    // 前回請求/入金/調整/繰越 (繰越は使わない)
         String(t.net), String(t.tax), String(t.gross),
         String(t.gross),                       // おもての請求金額 (必須)
-        String(t.net), String(t.tax), String(t.gross), // 10% の内訳 (全額10%課税)
+        String(bd.taxed.net), String(bd.taxed.tax), String(bd.taxed.gross),     // 10% の内訳
+        String(bd.untaxed.net), String(bd.untaxed.tax), String(bd.untaxed.gross), // 不課税の内訳 (立替金)
         ymd(h.closingDate), h.note ?? '',
         // 振込先 (請求書1件に対して同じ内容)
         b.code, b.bankCode, b.bankName, b.bankNameKana,
@@ -135,7 +142,7 @@ function row(h: BtobInvoiceHeader, t: Totals, l: BtobInvoiceLine, withHeader: bo
     ymd(l.date), '', l.productCode ?? '', l.item,
     String(l.quantity), l.unitPrice === null ? '' : String(l.unitPrice), l.unit,
     String(l.amount), String(l.tax), String(l.amount + l.tax),
-    '課税', String(l.taxRate), '税抜',
+    l.taxClass ?? '課税', String(l.taxRate), '税抜',
     l.departmentCode ?? '', l.departmentName ?? '', l.note ?? '',
   ];
 }
@@ -147,11 +154,19 @@ function row(h: BtobInvoiceHeader, t: Totals, l: BtobInvoiceLine, withHeader: bo
 export function buildBtobInvoiceCsv(header: BtobInvoiceHeader, lines: BtobInvoiceLine[]): string {
   const totals = lines.reduce<Totals>(
     (acc, l) => ({ net: acc.net + l.amount, tax: acc.tax + l.tax, gross: acc.gross + l.amount + l.tax }),
-    { net: 0, tax: 0, gross: 0 },
+    zero(),
   );
+  // 税区分ごとの内訳 (おもての「10%…」「不課税…」欄)
+  const breakdown: Breakdown = { taxed: zero(), untaxed: zero() };
+  for (const l of lines) {
+    const b = (l.taxClass ?? '課税') === '不課税' ? breakdown.untaxed : breakdown.taxed;
+    b.net += l.amount;
+    b.tax += l.tax;
+    b.gross += l.amount + l.tax;
+  }
   const out: string[] = [BTOB_COLUMNS.map(esc).join(',')];
   lines.forEach((l, i) => {
-    const cells = row(header, totals, l, REPEAT_HEADER || i === 0);
+    const cells = row(header, totals, breakdown, l, REPEAT_HEADER || i === 0);
     cells[HEADER_COLS + 1] = String(i + 1); // 明細番号
     out.push(cells.map(esc).join(','));
   });
