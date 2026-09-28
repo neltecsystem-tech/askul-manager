@@ -66,8 +66,8 @@ export const BTOB_COLUMNS = [
   '金額', '消費税額', '請求金額',
   '税区分（課税／非課税／免税／不課税）', '税率', '税額入力形式（税抜／税込／手入力）',
   '部門コード', '部門名', '明細備考',
-  // ── 47〜49列目。 BtoB側の対応付けに登録済み (不課税 = 立替金)
-  '不課税請求金額（税抜）', '不課税消費税額', '不課税請求金額（税込）',
+  // ── 47〜49列目。 非課税 = 立替金(駐車場代の実費)
+  '非課税請求金額（税抜）', '非課税消費税額', '非課税請求金額（税込）',
 ] as const;
 
 export interface BtobInvoiceHeader {
@@ -93,8 +93,9 @@ export interface BtobInvoiceLine {
   amount: number;         // 金額 (税抜)
   tax: number;            // 消費税額
   taxRate: number;        // 税率 (10 など)。不課税は 0
-  // 税区分。 立替金(駐車場代の実費)は 消費税を乗せないので '不課税'
-  taxClass?: '課税' | '不課税';
+  // 税区分。 BtoBの選択肢は「課税 / 非課税」。
+  // 立替金(駐車場代の実費)は 消費税を乗せないので '非課税'
+  taxClass?: '課税' | '非課税';
   departmentCode?: string;
   departmentName?: string;
   note?: string;
@@ -111,7 +112,7 @@ const esc = (v: string | number | undefined | null): string => {
 };
 
 interface Totals { net: number; tax: number; gross: number }
-/** 税区分ごとの内訳。 おもての「10%…」「不課税…」欄に入れる */
+/** 税区分ごとの内訳。 おもての「10%…」「非課税…」欄に入れる */
 interface Breakdown { taxed: Totals; untaxed: Totals }
 const zero = (): Totals => ({ net: 0, tax: 0, gross: 0 });
 
@@ -154,7 +155,41 @@ function row(h: BtobInvoiceHeader, t: Totals, bd: Breakdown, l: BtobInvoiceLine,
  * CSV本文を作る。明細番号は 1 から振り直す。
  * 合計は明細の積み上げにする(おもての金額と内訳が必ず一致するように)。
  */
-export function buildBtobInvoiceCsv(header: BtobInvoiceHeader, lines: BtobInvoiceLine[]): string {
+/**
+ * 消費税を BtoB側の設定に合わせて入れ直す。
+ * 🚨 先方の設定は「課税単位:請求総額 / 小数点以下:切捨て」。
+ *    課税分の税抜合計 × 10% を切り捨てた額が消費税で、 それを各課税行に按分し
+ *    端数は最後の課税行で調整する (行ごとに四捨五入して足すと数円ずれる)。
+ */
+function withInvoiceLevelTax(lines: BtobInvoiceLine[]): BtobInvoiceLine[] {
+  const taxedIdx = lines
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => (l.taxClass ?? '課税') !== '非課税')
+    .map(({ i }) => i);
+  if (taxedIdx.length === 0) return lines.map((l) => ({ ...l, tax: 0 }));
+
+  const taxedNet = taxedIdx.reduce((s, i) => s + lines[i].amount, 0);
+  const totalTax = Math.floor((taxedNet * 10) / 100);
+  const out = lines.map((l) => ({ ...l, tax: 0 }));
+  let left = totalTax;
+  taxedIdx.forEach((i, n) => {
+    const t = n === taxedIdx.length - 1 ? left : Math.round((lines[i].amount * 10) / 100);
+    left -= t;
+    out[i].tax = t;
+  });
+  return out;
+}
+
+/** 画面の表示用に、 CSVに出るのと同じ合計を返す */
+export function btobInvoiceTotals(lines: BtobInvoiceLine[]): { net: number; tax: number; gross: number } {
+  return withInvoiceLevelTax(lines).reduce(
+    (a, l) => ({ net: a.net + l.amount, tax: a.tax + l.tax, gross: a.gross + l.amount + l.tax }),
+    { net: 0, tax: 0, gross: 0 },
+  );
+}
+
+export function buildBtobInvoiceCsv(header: BtobInvoiceHeader, rawLines: BtobInvoiceLine[]): string {
+  const lines = withInvoiceLevelTax(rawLines);
   const totals = lines.reduce<Totals>(
     (acc, l) => ({ net: acc.net + l.amount, tax: acc.tax + l.tax, gross: acc.gross + l.amount + l.tax }),
     zero(),
@@ -162,7 +197,7 @@ export function buildBtobInvoiceCsv(header: BtobInvoiceHeader, lines: BtobInvoic
   // 税区分ごとの内訳 (おもての「10%…」「不課税…」欄)
   const breakdown: Breakdown = { taxed: zero(), untaxed: zero() };
   for (const l of lines) {
-    const b = (l.taxClass ?? '課税') === '不課税' ? breakdown.untaxed : breakdown.taxed;
+    const b = (l.taxClass ?? '課税') === '非課税' ? breakdown.untaxed : breakdown.taxed;
     b.net += l.amount;
     b.tax += l.tax;
     b.gross += l.amount + l.tax;

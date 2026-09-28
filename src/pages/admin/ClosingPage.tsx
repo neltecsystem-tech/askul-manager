@@ -8,7 +8,7 @@ import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import {
-  buildBtobInvoiceCsv, toShiftJisBlob, defaultInvoiceNo, dueDateFromClosing,
+  buildBtobInvoiceCsv, btobInvoiceTotals, toShiftJisBlob, defaultInvoiceNo, dueDateFromClosing,
   type BtobBank,
   type BtobInvoiceLine,
 } from '../../lib/btobInvoiceCsv';
@@ -2018,7 +2018,7 @@ function BtobCsvModal({
           amount: advance.total ?? 0,
           tax: 0,
           taxRate: 0,
-          taxClass: '不課税',
+          taxClass: '非課税',
           // 明細備考は 記号で弾かれることがあるので空にする (内訳は立替金精算書を別紙で出す)
         });
       }
@@ -2027,7 +2027,8 @@ function BtobCsvModal({
     [aggregates, closingDate, productCode, advance, useAdvance],
   );
 
-  const total = lines.reduce((s, l) => s + l.amount + l.tax, 0);
+  // 表示する合計は CSV に出るのと同じ計算 (課税分は 請求総額×10% の切捨て)
+  const total = btobInvoiceTotals(lines).gross;
 
   const download = () => {
     try {
@@ -2080,7 +2081,7 @@ function BtobCsvModal({
           </label>
           {advance?.found && (
             <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 8 }}>
-              立替金精算書「{advance.sheetName}」{advance.rows?.length ?? 0}件 ／ 不課税（消費税は乗せません）
+              立替金精算書「{advance.sheetName}」{advance.rows?.length ?? 0}件 ／ 非課税（消費税は乗せません）
               {advance.totalMatches === false && (
                 <div style={{ color: '#b91c1c' }}>
                   ⚠ シートの総計 ¥{(advance.sheetTotal ?? 0).toLocaleString()} と
