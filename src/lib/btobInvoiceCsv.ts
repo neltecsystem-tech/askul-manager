@@ -50,24 +50,24 @@ export const EMPTY_BANK: BtobBank = {
 };
 
 export const BTOB_COLUMNS = [
-  // ── ここから 1〜30列目は 先方の「請求書標準フォーマット.csv」と同じ並び。
-  //    フォーマット設定は列の番号で覚えるので、 この30列の順番は絶対に変えない。
-  //    項目を足すときは必ず 31列目以降(いちばん後ろ)に足すこと。
-  '請求書番号', '発行先コード', '件名', '入金期限',
+  // 🚨 この並びは BtoBプラットフォーム側の「アップロードフォーマット設定」に
+  //    登録済みの対応付け(貴社データの何番目か)と一対一で合わせてある。
+  //    **順番を変えたら先方の設定が全部ズレて取り込めなくなる**。
+  //    項目を足すときは必ず いちばん後ろに足すこと。
+  '請求書番号', '支払先コード', '事業者区分', '事業者登録番号', '件名', '支払期限',
   '前回請求金額', '入金額', '調整金額', '繰越金額',
   '今回請求金額（税抜）', '今回消費税額', '今回請求金額（税込）', 'おもての請求金額',
-  '締日', '備考',
-  '明細日付', '明細番号', '商品コード', '明細項目', '数量', '単価', '単位',
-  '金額', '消費税額', '請求金額',
-  '税区分（課税／非課税／免税／不課税）', '税率', '税額入力形式（税抜／税込／手入力）',
-  '部門コード', '部門名', '備考',
-  // ── ここから先は テンプレートに無い項目 (割り当てなくても取り込める)
-  '事業者区分', '事業者登録番号',
   '10%請求金額（税抜）', '10%消費税額', '10%請求金額（税込）',
-  '不課税請求金額（税抜）', '不課税消費税額', '不課税請求金額（税込）',
+  '締日', '備考',
   '振込先コード', '金融機関コード', '金融機関名', '金融機関名カナ',
   '支店コード', '支店名', '支店名カナ',
   '預金種別', '口座番号', '預金者名', '預金者名カナ',
+  '明細日付', '明細番号', '商品コード', '明細項目', '数量', '単価', '単位',
+  '金額', '消費税額', '請求金額',
+  '税区分（課税／非課税／免税／不課税）', '税率', '税額入力形式（税抜／税込／手入力）',
+  '部門コード', '部門名', '明細備考',
+  // ── 47列目以降 = 後から足した項目 (割り当てなくても取り込める)
+  '不課税請求金額（税抜）', '不課税消費税額', '不課税請求金額（税込）',
 ] as const;
 
 export interface BtobInvoiceHeader {
@@ -118,17 +118,24 @@ const zero = (): Totals => ({ net: 0, tax: 0, gross: 0 });
 /** 1行ぶん(おもて + 明細)を作る。おもてを載せるかは withHeader で切り替える。 */
 function row(h: BtobInvoiceHeader, t: Totals, bd: Breakdown, l: BtobInvoiceLine, withHeader: boolean): string[] {
   const b = h.bank ?? EMPTY_BANK;
-  // 1〜14列目 = 請求書1件ぶん (テンプレートの並び)
+  // 1〜30列目 = 請求書1件ぶん
   const head = withHeader
     ? [
-        h.invoiceNo, h.partnerCode, h.subject, ymd(h.dueDate),
+        h.invoiceNo, h.partnerCode,
+        h.businessClass ?? NELTEC_BUSINESS_CLASS,
+        h.registrationNo ?? NELTEC_REGISTRATION_NO,
+        h.subject, ymd(h.dueDate),
         '0', '0', '0', '0',                    // 前回請求/入金/調整/繰越 (繰越は使わない)
         String(t.net), String(t.tax), String(t.gross),
         String(t.gross),                       // おもての請求金額 (必須)
+        String(bd.taxed.net), String(bd.taxed.tax), String(bd.taxed.gross), // 10% の内訳
         ymd(h.closingDate), h.note ?? '',
+        b.code, b.bankCode, b.bankName, b.bankNameKana,
+        b.branchCode, b.branchName, b.branchNameKana,
+        b.accountType, b.accountNo, b.accountName, b.accountNameKana,
       ]
-    : new Array(14).fill('');
-  // 15〜30列目 = 明細1行ぶん (テンプレートの並び)
+    : new Array(30).fill('');
+  // 31〜46列目 = 明細1行ぶん
   const detail = [
     ymd(l.date), '', l.productCode ?? '', l.item,
     String(l.quantity), l.unitPrice === null ? '' : String(l.unitPrice), l.unit,
@@ -136,18 +143,10 @@ function row(h: BtobInvoiceHeader, t: Totals, bd: Breakdown, l: BtobInvoiceLine,
     l.taxClass ?? '課税', String(l.taxRate), '税抜',
     l.departmentCode ?? '', l.departmentName ?? '', l.note ?? '',
   ];
-  // 31列目以降 = テンプレートに無い追加項目 (請求書1件ぶん)
+  // 47列目以降 = 後から足した項目 (請求書1件ぶん)
   const extra = withHeader
-    ? [
-        h.businessClass ?? NELTEC_BUSINESS_CLASS,
-        h.registrationNo ?? NELTEC_REGISTRATION_NO,
-        String(bd.taxed.net), String(bd.taxed.tax), String(bd.taxed.gross),
-        String(bd.untaxed.net), String(bd.untaxed.tax), String(bd.untaxed.gross),
-        b.code, b.bankCode, b.bankName, b.bankNameKana,
-        b.branchCode, b.branchName, b.branchNameKana,
-        b.accountType, b.accountNo, b.accountName, b.accountNameKana,
-      ]
-    : new Array(19).fill('');
+    ? [String(bd.untaxed.net), String(bd.untaxed.tax), String(bd.untaxed.gross)]
+    : new Array(3).fill('');
   return [...head, ...detail, ...extra];
 }
 
@@ -155,13 +154,6 @@ function row(h: BtobInvoiceHeader, t: Totals, bd: Breakdown, l: BtobInvoiceLine,
  * CSV本文を作る。明細番号は 1 から振り直す。
  * 合計は明細の積み上げにする(おもての金額と内訳が必ず一致するように)。
  */
-// 見出しに列番号を付ける (01_請求書番号 …)。
-// フォーマット設定は「貴社データの何番目か」で覚えるので、
-// 画面に番号付きで出るようにして 割り当て間違いを防ぐ
-function numbered(name: string, i: number): string {
-  return `${String(i + 1).padStart(2, '0')}_${name}`;
-}
-
 export function buildBtobInvoiceCsv(header: BtobInvoiceHeader, lines: BtobInvoiceLine[]): string {
   const totals = lines.reduce<Totals>(
     (acc, l) => ({ net: acc.net + l.amount, tax: acc.tax + l.tax, gross: acc.gross + l.amount + l.tax }),
@@ -175,10 +167,10 @@ export function buildBtobInvoiceCsv(header: BtobInvoiceHeader, lines: BtobInvoic
     b.tax += l.tax;
     b.gross += l.amount + l.tax;
   }
-  const out: string[] = [BTOB_COLUMNS.map((c, i) => esc(numbered(c, i))).join(',')];
+  const out: string[] = [BTOB_COLUMNS.map(esc).join(',')];
   lines.forEach((l, i) => {
     const cells = row(header, totals, breakdown, l, REPEAT_HEADER || i === 0);
-    cells[15] = String(i + 1); // 明細番号 (16列目)
+    cells[31] = String(i + 1); // 明細番号 (32列目)
     out.push(cells.map(esc).join(','));
   });
   return out.join('\r\n') + '\r\n';
