@@ -155,6 +155,13 @@ function row(h: BtobInvoiceHeader, t: Totals, bd: Breakdown, l: BtobInvoiceLine,
  * CSV本文を作る。明細番号は 1 から振り直す。
  * 合計は明細の積み上げにする(おもての金額と内訳が必ず一致するように)。
  */
+// 見出しに列番号を付ける (01_請求書番号 …)。
+// フォーマット設定は「貴社データの何番目か」で覚えるので、
+// 画面に番号付きで出るようにして 割り当て間違いを防ぐ
+function numbered(name: string, i: number): string {
+  return `${String(i + 1).padStart(2, '0')}_${name}`;
+}
+
 export function buildBtobInvoiceCsv(header: BtobInvoiceHeader, lines: BtobInvoiceLine[]): string {
   const totals = lines.reduce<Totals>(
     (acc, l) => ({ net: acc.net + l.amount, tax: acc.tax + l.tax, gross: acc.gross + l.amount + l.tax }),
@@ -168,7 +175,7 @@ export function buildBtobInvoiceCsv(header: BtobInvoiceHeader, lines: BtobInvoic
     b.tax += l.tax;
     b.gross += l.amount + l.tax;
   }
-  const out: string[] = [BTOB_COLUMNS.map(esc).join(',')];
+  const out: string[] = [BTOB_COLUMNS.map((c, i) => esc(numbered(c, i))).join(',')];
   lines.forEach((l, i) => {
     const cells = row(header, totals, breakdown, l, REPEAT_HEADER || i === 0);
     cells[15] = String(i + 1); // 明細番号 (16列目)
