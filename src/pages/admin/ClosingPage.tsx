@@ -1987,20 +1987,16 @@ function BtobCsvModal({
         cells.forEach((c, i) => {
           const t = i === cells.length - 1 ? taxLeft : Math.round(c.amount * 0.1);
           taxLeft -= t;
-          // 🚨 数量/単価/単位は 2026-09-25 に取り込みが通ったときの形にそろえる。
-          //    数量=1 / 単価=その行の金額 / 単位=式。
-          //    (日の中でサイズ区分ごとに単価が違うため 単価を1つに決められず、
-          //     単価を空欄にしたら取り込みで弾かれた)
-          //    個数は明細項目の文言に入れて請求書に残す。
-          //    明細項目に () を入れると先方側で落ちるので 記号は使わない
-          const qty = c.quantity > 0 ? `${c.quantity.toLocaleString()}個` : '';
+          // 🚨 この形(数量=個数 / 単価=空 / 単位=個)で 先方の取り込みが通っている。 変えないこと。
+          //    日の中でサイズ区分ごとに単価が違うため 単価は1つに決められず空で出す
+          const hasQty = c.quantity > 0;
           out.push({
             date: c.date,
             productCode: productCode || undefined,
-            item: `配送業務 ${a.driver_name}${a.driver_code ? ` ${a.driver_code}` : ''}${qty ? ` ${qty}` : ''}`,
-            quantity: 1,
-            unitPrice: c.amount,
-            unit: '式',
+            item: `配送業務 ${a.driver_name}${a.driver_code ? `(${a.driver_code})` : ''}`,
+            quantity: hasQty ? c.quantity : 1,
+            unitPrice: hasQty ? null : c.amount,
+            unit: hasQty ? '個' : '式',
             amount: c.amount,
             tax: t,
             taxRate: 10,
@@ -2062,7 +2058,7 @@ function BtobCsvModal({
       <div style={{ ...modalStyle.modal, maxWidth: 560 }}>
         <div style={{ fontSize: 17, fontWeight: 600, marginBottom: 4 }}>請求CSV (BtoBプラットフォーム)</div>
         <div style={{ fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>
-          アスクル宛の請求書1件として書き出します。明細はドライバー×稼働日で1行（請求が0円の人は入りません）。個数は品名に入れています。
+          アスクル宛の請求書1件として書き出します。明細はドライバー×稼働日で1行（請求が0円の人は入りません）。
         </div>
 
         {field('請求書番号', invoiceNo, setInvoiceNo)}

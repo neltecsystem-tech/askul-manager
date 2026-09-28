@@ -66,8 +66,6 @@ export const BTOB_COLUMNS = [
   '金額', '消費税額', '請求金額',
   '税区分（課税／非課税／免税／不課税）', '税率', '税額入力形式（税抜／税込／手入力）',
   '部門コード', '部門名', '明細備考',
-  // ── 47列目以降 = 後から足した項目 (割り当てなくても取り込める)
-  '不課税請求金額（税抜）', '不課税消費税額', '不課税請求金額（税込）',
 ] as const;
 
 export interface BtobInvoiceHeader {
@@ -143,11 +141,10 @@ function row(h: BtobInvoiceHeader, t: Totals, bd: Breakdown, l: BtobInvoiceLine,
     l.taxClass ?? '課税', String(l.taxRate), '税抜',
     l.departmentCode ?? '', l.departmentName ?? '', l.note ?? '',
   ];
-  // 47列目以降 = 後から足した項目 (請求書1件ぶん)
-  const extra = withHeader
-    ? [String(bd.untaxed.net), String(bd.untaxed.tax), String(bd.untaxed.gross)]
-    : new Array(3).fill('');
-  return [...head, ...detail, ...extra];
+  // 🚨 これ以上 列を足さない。 46列ちょうどが 先方の取り込みが通る形。
+  //    不課税の内訳(おもて)は列が無いので送っていない
+  void bd.untaxed;
+  return [...head, ...detail];
 }
 
 /**
