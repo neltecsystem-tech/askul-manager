@@ -54,6 +54,13 @@ function vdKey(v: VehicleDay): string {
 
 // 特別日当 (フォーム入力) は種別に関わらず すべて車建扱い (控除対象外)
 // 個建+ も含めて全て「車建欄」に表示し、 控除を引かない
+// 「引継ぎ」の特別日当か。
+// シートの種別は手入力なので「引継ぎ / 引き継ぎ / 引継」や前後の空白が混ざりうる。
+// 完全一致で見ると拾えない日が出るため、空白を落として「引継」を含むかで判定する。
+function isTakeoverType(type: string | undefined | null): boolean {
+  return (type ?? '').replace(/[\s　]/g, '').includes('引継');
+}
+
 function formAdjustment(_type: string): 'vehicle' | 'kodate' {
   return 'vehicle';
 }
@@ -365,7 +372,7 @@ export default function ClosingPage() {
     //  キーは ensure() と同じ「空白を落とした氏名 + 稼働日」で揃える。
     const takeoverDays = new Set<string>();
     for (const f of filteredForm) {
-      if (f.type === '引継ぎ') takeoverDays.add(`${driverNameKey(f.driver_name)}|${f.work_date}`);
+      if (isTakeoverType(f.type)) takeoverDays.add(`${driverNameKey(f.driver_name)}|${f.work_date}`);
     }
 
     for (const r of filtered) {
@@ -1104,7 +1111,7 @@ function PaymentStatementModal({
     const formAdds = formByDate.get(ds) ?? [];
     const isMasterVehicleDay = aggregate.vehicle_day_dates.has(ds);
     // 引継ぎの日は車建日と同じく個建を積まない(日当で置換する)
-    const isTakeoverDay = formAdds.some((f) => f.type === '引継ぎ');
+    const isTakeoverDay = formAdds.some((f) => isTakeoverType(f.type));
     const masterVehicle = isMasterVehicleDay ? (aggregate.vehicle_day_amounts.get(ds) ?? 0) : 0;
     const kodateBase = (isMasterVehicleDay || isTakeoverDay) ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
     const formKodate = formAdds.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
@@ -1623,7 +1630,7 @@ function BulkDocumentsView({
             } else {
               const isMasterVehicleDay = agg.vehicle_day_dates.has(ds);
               // 引継ぎの日は車建日と同じく個建を積まない(日当で置換する)
-              const isTakeoverDay = formAdds.some((f) => f.type === '引継ぎ');
+              const isTakeoverDay = formAdds.some((f) => isTakeoverType(f.type));
               const masterVehicle = isMasterVehicleDay ? (agg.vehicle_day_amounts.get(ds) ?? 0) : 0;
               const kodateBase = (isMasterVehicleDay || isTakeoverDay) ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
               const formKodate = formAdds.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
