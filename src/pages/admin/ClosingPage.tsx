@@ -359,6 +359,15 @@ export default function ClosingPage() {
       m.set(rate, (m.get(rate) ?? 0) + amount);
     };
 
+    // 「引継ぎ」の特別日当がある日。車建日と同じく、その日の個建は積まない(置換)。
+    //  引継ぎは通常のルートに出ず引継ぎ作業をした日なので、個数に応じた個建の上に
+    //  日当を足すと二重払いになる。2026-09-30 に加算→置換へ変更。
+    //  キーは ensure() と同じ「空白を落とした氏名 + 稼働日」で揃える。
+    const takeoverDays = new Set<string>();
+    for (const f of filteredForm) {
+      if (f.type === '引継ぎ') takeoverDays.add(`${driverNameKey(f.driver_name)}|${f.work_date}`);
+    }
+
     for (const r of filtered) {
       // 請求書側 (アスクル原データ、 swap 影響なし): シート上の名前で集計
       const aggInvoice = ensure(r.driver_code, r.driver_name, r.work_date);
@@ -374,10 +383,14 @@ export default function ClosingPage() {
       aggPay.rows.push(rPay);
 
       const vehAmount = vehicleDayMap.get(mdKey(rPay.work_date));
+      const isTakeover = takeoverDays.has(`${driverNameKey(rPay.driver_name)}|${rPay.work_date}`);
       if (vehAmount !== undefined) {
         // 車建日: 個建ではなく車建扱い。 日単位で後ほど1回だけ加算 (控除対象外)
         aggPay.vehicle_day_dates.add(rPay.work_date);
         aggPay.vehicle_day_amounts.set(rPay.work_date, vehAmount);
+      } else if (isTakeover) {
+        // 引継ぎ日: 車建日と同じ扱い。個建を積まず、日当だけを下のフォーム集計で足す。
+        // 控除対象にもしない(特別日当は控除対象外なので、そこに揃える)。
       } else {
         // 通常の個建: revenue に積む + 控除対象 amount を率ごとに溜める
         aggPay.revenue += rPay.amount || 0;
@@ -1090,8 +1103,10 @@ function PaymentStatementModal({
     const rows = byDate.get(ds) ?? [];
     const formAdds = formByDate.get(ds) ?? [];
     const isMasterVehicleDay = aggregate.vehicle_day_dates.has(ds);
+    // 引継ぎの日は車建日と同じく個建を積まない(日当で置換する)
+    const isTakeoverDay = formAdds.some((f) => f.type === '引継ぎ');
     const masterVehicle = isMasterVehicleDay ? (aggregate.vehicle_day_amounts.get(ds) ?? 0) : 0;
-    const kodateBase = isMasterVehicleDay ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
+    const kodateBase = (isMasterVehicleDay || isTakeoverDay) ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
     const formKodate = formAdds.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
     const formVehicle = formAdds.filter((f) => formAdjustment(f.type) === 'vehicle').reduce((s, f) => s + f.amount, 0);
     const kodate = kodateBase + formKodate;
@@ -1607,8 +1622,10 @@ function BulkDocumentsView({
               kodate = rows.filter((r) => !isVehicleProduct(r.product_name)).reduce((s, r) => s + (r.amount || 0), 0);
             } else {
               const isMasterVehicleDay = agg.vehicle_day_dates.has(ds);
+              // 引継ぎの日は車建日と同じく個建を積まない(日当で置換する)
+              const isTakeoverDay = formAdds.some((f) => f.type === '引継ぎ');
               const masterVehicle = isMasterVehicleDay ? (agg.vehicle_day_amounts.get(ds) ?? 0) : 0;
-              const kodateBase = isMasterVehicleDay ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
+              const kodateBase = (isMasterVehicleDay || isTakeoverDay) ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
               const formKodate = formAdds.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
               const formVehicle = formAdds.filter((f) => formAdjustment(f.type) === 'vehicle').reduce((s, f) => s + f.amount, 0);
               kodate = kodateBase + formKodate;
