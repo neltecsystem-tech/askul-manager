@@ -62,8 +62,13 @@ function vdKey(v: VehicleDay): string {
 // 完全一致では拾えない日が出るため、空白を落として部分一致で見る。
 function replacesKodate(type: string | undefined | null): boolean {
   const t = (type ?? '').replace(/[\s　]/g, '');
-  if (t.includes('OR')) return false;   // 車建OR個建 (未確認のため従来どおり)
+  if (t.includes('OR')) return false;   // 車建OR個建 は日ごとに大小で決めるので、ここでは判定しない
   return t.includes('引継') || t.includes('車建');
+}
+
+// 「車建OR個建」か。その日の個建実績と日当を比べて、大きい方だけを採用する。
+function isOrType(type: string | undefined | null): boolean {
+  return (type ?? '').replace(/[\s　]/g, '').includes('OR');
 }
 
 function formAdjustment(_type: string): 'vehicle' | 'kodate' {
@@ -380,6 +385,26 @@ export default function ClosingPage() {
       if (replacesKodate(f.type)) takeoverDays.add(`${driverNameKey(f.driver_name)}|${f.work_date}`);
     }
 
+    // 「車建OR個建」は、その日の個建実績と日当を比べて大きい方だけを採用する。
+    // 先に日ごとの個建実績(支払い側= swap 適用後)を出しておく必要がある。
+    const kodateByDay = new Map<string, number>();
+    for (const r of filtered) {
+      const rp = applySwap(r);
+      const k = `${driverNameKey(rp.driver_name)}|${rp.work_date}`;
+      kodateByDay.set(k, (kodateByDay.get(k) ?? 0) + (r.amount || 0));
+    }
+    const orByDay = new Map<string, number>();
+    for (const f of filteredForm) {
+      if (!isOrType(f.type)) continue;
+      const k = `${driverNameKey(f.driver_name)}|${f.work_date}`;
+      orByDay.set(k, (orByDay.get(k) ?? 0) + f.amount);
+    }
+    // 日当が勝った日は、車建・引継ぎと同じく個建を積まない
+    const orWinDays = new Set<string>();
+    for (const [k, amount] of orByDay) {
+      if (amount > (kodateByDay.get(k) ?? 0)) { orWinDays.add(k); takeoverDays.add(k); }
+    }
+
     for (const r of filtered) {
       // 請求書側 (アスクル原データ、 swap 影響なし): シート上の名前で集計
       const aggInvoice = ensure(r.driver_code, r.driver_name, r.work_date);
@@ -421,6 +446,8 @@ export default function ClosingPage() {
     }
 
     for (const f of filteredForm) {
+      // 個建の方が大きかった「車建OR個建」は採用しない(大きい方だけを払う)
+      if (isOrType(f.type) && !orWinDays.has(`${driverNameKey(f.driver_name)}|${f.work_date}`)) continue;
       const agg = ensure('', f.driver_name, f.work_date);
       agg.formRows.push(f);
       agg.days.add(f.work_date);
@@ -1115,12 +1142,17 @@ function PaymentStatementModal({
     const rows = byDate.get(ds) ?? [];
     const formAdds = formByDate.get(ds) ?? [];
     const isMasterVehicleDay = aggregate.vehicle_day_dates.has(ds);
-    // 引継ぎの日は車建日と同じく個建を積まない(日当で置換する)
+    const kodateActual = rows.reduce((s, r) => s + (r.amount || 0), 0);
+    // 車建・引継ぎの日は個建を積まない(日当で置換する)
     const isTakeoverDay = formAdds.some((f) => replacesKodate(f.type));
+    // 車建OR個建 は その日の個建実績と比べて大きい方だけを採用する
+    const orAmount = formAdds.filter((f) => isOrType(f.type)).reduce((s, f) => s + f.amount, 0);
+    const orWins = orAmount > kodateActual;
+    const usable = formAdds.filter((f) => !isOrType(f.type) || orWins);
     const masterVehicle = isMasterVehicleDay ? (aggregate.vehicle_day_amounts.get(ds) ?? 0) : 0;
-    const kodateBase = (isMasterVehicleDay || isTakeoverDay) ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
-    const formKodate = formAdds.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
-    const formVehicle = formAdds.filter((f) => formAdjustment(f.type) === 'vehicle').reduce((s, f) => s + f.amount, 0);
+    const kodateBase = (isMasterVehicleDay || isTakeoverDay || orWins) ? 0 : kodateActual;
+    const formKodate = usable.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
+    const formVehicle = usable.filter((f) => formAdjustment(f.type) === 'vehicle').reduce((s, f) => s + f.amount, 0);
     const kodate = kodateBase + formKodate;
     const vehicle = masterVehicle + formVehicle;
     const qty = rows.reduce((s, r) => s + (r.quantity || 0), 0);
@@ -1634,12 +1666,17 @@ function BulkDocumentsView({
               kodate = rows.filter((r) => !isVehicleProduct(r.product_name)).reduce((s, r) => s + (r.amount || 0), 0);
             } else {
               const isMasterVehicleDay = agg.vehicle_day_dates.has(ds);
-              // 引継ぎの日は車建日と同じく個建を積まない(日当で置換する)
+              const kodateActual = rows.reduce((s, r) => s + (r.amount || 0), 0);
+              // 車建・引継ぎの日は個建を積まない(日当で置換する)
               const isTakeoverDay = formAdds.some((f) => replacesKodate(f.type));
+              // 車建OR個建 は その日の個建実績と比べて大きい方だけを採用する
+              const orAmount = formAdds.filter((f) => isOrType(f.type)).reduce((s, f) => s + f.amount, 0);
+              const orWins = orAmount > kodateActual;
+              const usable = formAdds.filter((f) => !isOrType(f.type) || orWins);
               const masterVehicle = isMasterVehicleDay ? (agg.vehicle_day_amounts.get(ds) ?? 0) : 0;
-              const kodateBase = (isMasterVehicleDay || isTakeoverDay) ? 0 : rows.reduce((s, r) => s + (r.amount || 0), 0);
-              const formKodate = formAdds.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
-              const formVehicle = formAdds.filter((f) => formAdjustment(f.type) === 'vehicle').reduce((s, f) => s + f.amount, 0);
+              const kodateBase = (isMasterVehicleDay || isTakeoverDay || orWins) ? 0 : kodateActual;
+              const formKodate = usable.filter((f) => formAdjustment(f.type) === 'kodate').reduce((s, f) => s + f.amount, 0);
+              const formVehicle = usable.filter((f) => formAdjustment(f.type) === 'vehicle').reduce((s, f) => s + f.amount, 0);
               kodate = kodateBase + formKodate;
               vehicle = masterVehicle + formVehicle;
             }
