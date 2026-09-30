@@ -580,16 +580,21 @@ export default function ClosingPage() {
           const rs = byDate.get(ds) ?? [];
           const formAdds = formByDate.get(ds) ?? [];
           const isMasterVehicleDay = agg.vehicle_day_dates.has(ds);
+          const kodateActual = rs.reduce((s, r) => s + (r.amount || 0), 0);
+          // 車建・引継ぎの日は個建を積まない(日当で置換する)
+          const isTakeoverDay = formAdds.some((f) => replacesKodate(f.type));
+          // 車建OR個建 は その日の個建実績と比べて大きい方だけを採用する
+          const orAmount = formAdds.filter((f) => isOrType(f.type)).reduce((s, f) => s + f.amount, 0);
+          const orWins = orAmount > kodateActual;
+          const usable = formAdds.filter((f) => !isOrType(f.type) || orWins);
           const masterVehicle = isMasterVehicleDay
             ? agg.vehicle_day_amounts.get(ds) ?? 0
             : 0;
-          const kodateBase = isMasterVehicleDay
-            ? 0
-            : rs.reduce((s, r) => s + (r.amount || 0), 0);
-          const formKodate = formAdds
+          const kodateBase = (isMasterVehicleDay || isTakeoverDay || orWins) ? 0 : kodateActual;
+          const formKodate = usable
             .filter((f) => formAdjustment(f.type) === 'kodate')
             .reduce((s, f) => s + f.amount, 0);
-          const formVehicle = formAdds
+          const formVehicle = usable
             .filter((f) => formAdjustment(f.type) === 'vehicle')
             .reduce((s, f) => s + f.amount, 0);
           const kodate = kodateBase + formKodate;
