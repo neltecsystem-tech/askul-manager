@@ -56,6 +56,9 @@ const DEFAULT_ITEMS: { key: string; label: string; fallbackAdmin: boolean; fallb
 
 const MOBILE_BREAKPOINT = 768;
 
+// 管理者しか見られないメニューの色 (濃い紺のサイドバー上で読める琥珀色)
+const ADMIN_ONLY_COLOR = '#fbbf24';
+
 export default function Layout() {
   const { profile, signOut } = useAuth();
   const isAdmin = profile?.role === 'admin';
@@ -128,16 +131,22 @@ export default function Layout() {
       return permissions
         .filter((p) => !SETTINGS_KEYS.has(p.page_key))
         .filter((p) => (isAdmin ? p.admin_visible : p.driver_visible))
-        .map((p) => ({ to: toPath(p.page_key), label: p.label }));
+        .map((p) => ({
+          to: toPath(p.page_key),
+          label: p.label,
+          // ドライバーには出ない = 管理者しか見られないページ
+          adminOnly: p.admin_visible && !p.driver_visible,
+        }));
     }
     return DEFAULT_ITEMS.filter((i) => (isAdmin ? i.fallbackAdmin : i.fallbackDriver)).map((i) => ({
       to: toPath(i.key),
       label: i.label,
+      adminOnly: i.fallbackAdmin && !i.fallbackDriver,
     }));
   })();
 
   if (isAdmin) {
-    items.push({ to: '/settings', label: '⚙ 設定' });
+    items.push({ to: '/settings', label: '⚙ 設定', adminOnly: true });
   }
 
   const sidebarStyle: CSSProperties = {
@@ -185,6 +194,8 @@ export default function Layout() {
               end={item.to === '/'}
               style={({ isActive }) => ({
                 ...styles.navLink,
+                // 管理者しか見られないページは色を変えて、ドライバーに見えているものと区別する
+                ...(isAdmin && item.adminOnly ? styles.navLinkAdminOnly : {}),
                 ...(isActive ? styles.navLinkActive : {}),
               })}
             >
@@ -192,6 +203,12 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
+        {isAdmin && items.some((i) => i.adminOnly) && (
+          <div style={styles.navLegend}>
+            <span style={{ color: colors.sidebarText }}>● ドライバーも見える</span>
+            <span style={{ color: ADMIN_ONLY_COLOR }}>● 管理者のみ</span>
+          </div>
+        )}
       </aside>
       <div style={styles.main}>
         <header style={styles.header}>
@@ -263,6 +280,17 @@ const styles: Record<string, CSSProperties> = {
     textDecoration: 'none',
     fontSize: 13,
     borderLeft: '3px solid transparent',
+  },
+  navLinkAdminOnly: { color: ADMIN_ONLY_COLOR },
+  navLegend: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    padding: '10px 16px',
+    marginTop: 'auto',
+    fontSize: 11,
+    lineHeight: 1.6,
+    borderTop: `1px solid ${colors.sidebarActive}`,
   },
   navLinkActive: {
     background: colors.sidebarActive,
