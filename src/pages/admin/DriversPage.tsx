@@ -257,6 +257,23 @@ export default function DriversPage() {
         await load();
         return;
       }
+
+      // 🚨 パスワードを再発行したら、初回ログインでの変更を**もう一度**必須にする。
+      //    ここを立て直さないと、管理者が決めたパスワードがそのまま使われ続ける
+      //    (一括登録の共通パスワードが長く残っていたのと同じ形の穴)。
+      //    本人が自分で設定し直せば、管理者は平文を持たない状態に戻る。
+      if (passwordChanged) {
+        const { error: mcErr } = await supabase
+          .from('profiles')
+          .update({ must_change_password: true })
+          .eq('id', editing.id);
+        if (mcErr) {
+          setBusy(false);
+          setError('初回パスワード変更の要求を立てられませんでした: ' + mcErr.message);
+          await load();
+          return;
+        }
+      }
     }
 
     setBusy(false);
