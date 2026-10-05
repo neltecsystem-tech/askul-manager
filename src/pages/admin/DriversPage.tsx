@@ -74,6 +74,23 @@ interface EditDriver {
   valid_to: string;
 }
 
+/**
+ * 一括登録用の仮パスワードを1人ずつ作る。
+ *
+ * 🚨 共通パスワードをコードに書かない。このリポジトリは公開されているので、
+ *    書いた値は「誰でも読める鍵」になる。実際に全員共通の値が埋め込まれていた
+ *    （2026-10-05に撤去）。
+ * 🚨 作った値は保存しない。画面に1度だけ出し、本人に渡したら終わり。
+ *    本人は初回ログインで自分のパスワードに変える（must_change_password）。
+ * 紛らわしい文字（0/O, 1/l/I）は口頭や電話で伝えるときに取り違えるので使わない。
+ */
+function tempPassword(): string {
+  const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const buf = new Uint8Array(12);
+  crypto.getRandomValues(buf);
+  return Array.from(buf, (b) => chars[b % chars.length]).join('');
+}
+
 function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -90,6 +107,10 @@ export default function DriversPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
+  // 一括登録で発行したID+仮パスワード。🚨 保存しないので画面を離れると二度と見られない
+  const [bulkIssued, setBulkIssued] = useState<
+    { seq: string; name: string; email: string; password: string }[]
+  >([]);
   const [showInactive, setShowInactive] = useState(false);
   const [accCompanies, setAccCompanies] = useState<string[]>([]); // 会計マスタの会社正式名称(会社名プルダウン用)
 
@@ -330,7 +351,7 @@ export default function DriversPage() {
   const bulkImport = async () => {
     if (
       !confirm(
-        `マスタシートから ${bulkImportList.length}名 を一括登録します。\nログインID: 0001〜${String(bulkImportList.length).padStart(4, '0')}\nパスワード: askul2026（全員共通）\n営業所: 杉並営業所\n\n続行しますか？`,
+        `マスタシートから ${bulkImportList.length}名 を一括登録します。\nログインID: 0001〜${String(bulkImportList.length).padStart(4, '0')}\nパスワード: 1人ずつ別の仮パスワードを発行します\n営業所: 杉並営業所\n\n🚨 仮パスワードはこの画面に1度だけ表示されます。保存していないので、閉じると二度と見られません（忘れたら「編集」から再発行）。\n\n続行しますか？`,
       )
     )
       return;
@@ -341,15 +362,20 @@ export default function DriversPage() {
     }
     setError(null);
     setBusy(true);
+    setBulkIssued([]);
     const errors: string[] = [];
+    const issued: { seq: string; name: string; email: string; password: string }[] = [];
     for (let i = 0; i < bulkImportList.length; i++) {
       const row = bulkImportList[i];
       const seq = String(i + 1).padStart(4, '0');
+      const email = `${seq}@askul.local`;
+      // 🚨 1人ずつ別の値にする。共通にすると、1人に伝えた値で全員に入れてしまう
+      const password = tempPassword();
       setBulkProgress(`${i + 1}/${bulkImportList.length}: ${row.full_name}`);
       const { data, error } = await supabase.functions.invoke('create-driver', {
         body: {
-          email: `${seq}@askul.local`,
-          password: 'askul2026',
+          email,
+          password,
           full_name: row.full_name,
           deduction_rate: row.deduction_rate,
           office_id: office.id,
@@ -357,9 +383,12 @@ export default function DriversPage() {
       });
       if (error || data?.error) {
         errors.push(`${seq} ${row.full_name}: ${error?.message ?? data?.error}`);
+      } else {
+        issued.push({ seq, name: row.full_name, email, password });
       }
     }
     setBulkProgress(null);
+    setBulkIssued(issued);
     setBusy(false);
     if (errors.length > 0) {
       setError(`一部失敗:\n${errors.join('\n')}`);
@@ -477,6 +506,55 @@ export default function DriversPage() {
       )}
       {error && (
         <div style={{ color: '#dc2626', marginBottom: 12, whiteSpace: 'pre-wrap' }}>{error}</div>
+      )}
+
+      {/* 一括登録で発行した仮パスワード。
+          🚨 保存していないので、この表示が唯一の受け渡し手段。閉じたら再発行するしかない。
+          🚨 共通パスワードだった頃は「コードを読めば全員のパスワードが分かる」状態だった。
+             1人ずつ別の値にしたので、1人ぶん漏れても他の人には使えない。 */}
+      {bulkIssued.length > 0 && (
+        <div style={{ ...card, marginBottom: 16, borderLeft: '4px solid #dc2626' }}>
+          <h2 style={sectionTitle}>🔑 発行した仮パスワード（{bulkIssued.length}人）</h2>
+          <div style={{ fontSize: 12, color: '#b91c1c', marginBottom: 8, fontWeight: 600 }}>
+            この表示を閉じると二度と見られません。保存していないためです。
+            いま本人に渡すか、コピーしてから閉じてください（忘れた場合は「編集」から再発行）。
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+            本人は初回ログインで自分のパスワードに変更します。それまでは仮パスワードのままです。
+          </div>
+          <button
+            style={{ ...btn, marginBottom: 8 }}
+            onClick={() => {
+              const text = bulkIssued
+                .map((r) => `${r.name}\t${r.email}\t${r.password}`)
+                .join('\n');
+              navigator.clipboard?.writeText(text);
+            }}
+          >
+            一覧をコピー
+          </button>
+          <table style={table}>
+            <thead>
+              <tr>
+                <th style={th}>氏名</th>
+                <th style={th}>ログインID</th>
+                <th style={th}>仮パスワード</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bulkIssued.map((r) => (
+                <tr key={r.seq}>
+                  <td style={td}>{r.name}</td>
+                  <td style={td}>{r.email}</td>
+                  <td style={{ ...td, fontFamily: 'monospace' }}>{r.password}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button style={{ ...btn, marginTop: 8 }} onClick={() => setBulkIssued([])}>
+            渡し終えたので閉じる
+          </button>
+        </div>
       )}
 
       {/* 初回ログイン待ちリスト(構想⑥)。仮パスのまま未ログインの人。本人が初回PW変更で自動的に消える。
