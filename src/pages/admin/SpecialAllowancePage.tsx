@@ -4,6 +4,10 @@ import PageHeader from '../../components/PageHeader';
 import { btn, btnDanger, btnPrimary, card, colors, input, table, td, th } from '../../lib/ui';
 
 const TYPE_OPTIONS = ['個建+', '車建', '車建OR個建', '引継ぎ'];
+// 違約金は特別日当シートに書かず、DBの penalties に入れる。
+// このツールの支払計算には入らない(控除は会計の「車両リース・貸付金マスタ」で行う)。
+const PENALTY = '違約金';
+const NEW_TYPE_OPTIONS = [...TYPE_OPTIONS, PENALTY];
 const INPUTTER_OPTIONS = ['前橋', '吉田', '小林'];
 
 type DriverOption = { id: string; full_name: string };
@@ -17,7 +21,14 @@ type SheetRow = {
   amount: string;
   reason: string;
   inputter: string;
+  penaltyId?: string; // 違約金(DB)の行。シートの行は undefined
 };
+
+// 一覧の並び: 日付の新しい順(同じ日はシート行の新しい順)
+function sortKey(s: string): string {
+  const m = (s || '').replace(/-/g, '/').match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+  return m ? `${m[1]}${m[2].padStart(2, '0')}${m[3].padStart(2, '0')}` : '';
+}
 
 function todayJST(): string {
   const d = new Date();
@@ -80,12 +91,21 @@ export default function SpecialAllowancePage() {
     setLoadingRows(true);
     setRowsError('');
     try {
-      const { res, data } = await callFn('special-allowance-manage', { action: 'list' });
+      const [{ res, data }, pen] = await Promise.all([
+        callFn('special-allowance-manage', { action: 'list' }),
+        supabase.from('penalties').select('*').order('event_date', { ascending: false }),
+      ]);
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      if (pen.error) throw new Error('違約金の取得に失敗: ' + pen.error.message);
       const list = (data.rows ?? []) as SheetRow[];
-      // 新しい順 (シート行番号降順)
-      list.sort((a, b) => b.row - a.row);
-      setRows(list);
+      const penRows: SheetRow[] = ((pen.data ?? []) as any[]).map((p) => ({
+        row: 0, timestamp: p.created_at, event_date: String(p.event_date).replace(/-/g, '/'),
+        driver_name: p.driver_name, type: PENALTY, amount: String(p.amount),
+        reason: p.reason, inputter: p.inputter, penaltyId: p.id,
+      }));
+      const all = [...list, ...penRows];
+      all.sort((a, b) => sortKey(b.event_date).localeCompare(sortKey(a.event_date)) || b.row - a.row);
+      setRows(all);
     } catch (e) {
       setRowsError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -121,6 +141,19 @@ export default function SpecialAllowancePage() {
     }
 
     setSubmitting(true);
+    if (type === PENALTY) {
+      const { error } = await supabase.from('penalties').insert({
+        event_date: eventDate, driver_name: driverName, amount: Math.round(numAmount),
+        reason: reason.trim(), inputter,
+      });
+      setSubmitting(false);
+      if (error) { setStatus({ ok: false, message: '登録に失敗: ' + error.message }); return; }
+      setStatus({ ok: true, message: '違約金を登録しました（会計の控除に反映されます）' });
+      setAmount('');
+      setReason('');
+      fetchRows();
+      return;
+    }
     try {
       const { res, data } = await callFn('append-form-response', {
         event_date: eventDate,
@@ -164,6 +197,19 @@ export default function SpecialAllowancePage() {
       return;
     }
     setSavingEdit(true);
+    if (editing.penaltyId) {
+      const amt = Number(String(editing.amount).replace(/,/g, ''));
+      if (!isFinite(amt) || amt <= 0) { window.alert('金額は正の数値を入力してください'); setSavingEdit(false); return; }
+      const { error } = await supabase.from('penalties').update({
+        event_date: editing.event_date, driver_name: editing.driver_name, amount: Math.round(amt),
+        reason: editing.reason.trim(), inputter: editing.inputter,
+      }).eq('id', editing.penaltyId);
+      setSavingEdit(false);
+      if (error) { window.alert('保存に失敗: ' + error.message); return; }
+      setEditing(null);
+      fetchRows();
+      return;
+    }
     try {
       const { res, data } = await callFn('special-allowance-manage', {
         action: 'update',
@@ -190,7 +236,13 @@ export default function SpecialAllowancePage() {
   };
 
   const deleteRow = async (r: SheetRow) => {
-    if (!window.confirm(`削除しますか?\n${r.event_date} / ${r.driver_name} / ${r.amount}円`)) return;
+    if (!window.confirm(`削除しますか?\n${r.event_date} / ${r.driver_name} / ${r.type} / ${r.amount}円`)) return;
+    if (r.penaltyId) {
+      const { error } = await supabase.from('penalties').delete().eq('id', r.penaltyId);
+      if (error) window.alert('削除に失敗: ' + error.message);
+      else fetchRows();
+      return;
+    }
     try {
       const { res, data } = await callFn('special-allowance-manage', {
         action: 'delete',
@@ -216,6 +268,8 @@ export default function SpecialAllowancePage() {
           Googleフォーム同等の入力で「フォームの回答 1」シートに直接書き込みます。
           <br />
           同じ日付・氏名の重複登録はブロックされます。
+          <br />
+          種別「違約金」はシートに書かず、このツールの支払には入りません。会計の控除（車両リース・貸付金マスタ）に反映されます。
         </div>
 
         <Field label="日付">
@@ -240,7 +294,7 @@ export default function SpecialAllowancePage() {
 
         <Field label="種別">
           <select style={input} value={type} onChange={(e) => setType(e.target.value)}>
-            {TYPE_OPTIONS.map((t) => (
+            {NEW_TYPE_OPTIONS.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>
@@ -342,12 +396,12 @@ export default function SpecialAllowancePage() {
                 </tr>
               )}
               {rows.map((r) => (
-                <tr key={r.row}>
+                <tr key={r.penaltyId ?? r.row}>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{r.event_date}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{r.driver_name}</td>
-                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{r.type}</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap', color: r.penaltyId ? colors.danger : undefined, fontWeight: r.penaltyId ? 700 : undefined }}>{r.type}</td>
                   <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    {Number(String(r.amount).replace(/,/g, '')).toLocaleString()}
+                    {r.penaltyId ? '−' : ''}{Number(String(r.amount).replace(/,/g, '')).toLocaleString()}
                   </td>
                   <td style={td}>{r.reason}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{r.inputter}</td>
@@ -383,7 +437,7 @@ export default function SpecialAllowancePage() {
             style={{ ...card, padding: 20, width: '100%', maxWidth: 480 }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>特別日当 編集</div>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>{editing.penaltyId ? '違約金 編集' : '特別日当 編集'}</div>
 
             <Field label="日付">
               <input
@@ -416,8 +470,11 @@ export default function SpecialAllowancePage() {
               <select
                 style={input}
                 value={editing.type}
+                disabled={!!editing.penaltyId}
+                title={editing.penaltyId ? '違約金を特別日当に変えるときは削除して登録し直してください' : undefined}
                 onChange={(e) => setEditing({ ...editing, type: e.target.value })}
               >
+                {editing.penaltyId && <option value={PENALTY}>{PENALTY}</option>}
                 {!TYPE_OPTIONS.includes(editing.type) && editing.type && (
                   <option value={editing.type}>{editing.type}</option>
                 )}
