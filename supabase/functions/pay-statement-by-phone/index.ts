@@ -120,7 +120,8 @@ async function suspendedFor(profileId: string, ym: string): Promise<{ suspended:
   if (!profileId) return { suspended: false };
   try {
     const r = await fetch('https://nccognptoprhwsbjnwcu.supabase.co/functions/v1/pay-suspension', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      // 🔒 2026-10-15: check は合言葉が要る(3プロジェクト共通の PAY_SUSPENSION_SECRET)
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-tool-secret': Deno.env.get('PAY_SUSPENSION_SECRET') || '' },
       body: JSON.stringify({ action: 'check', profile_id: profileId, ym }),
     }).then((x) => x.json());
     return r?.suspended === true ? { suspended: true, message: String(r.message || '') } : { suspended: false };
