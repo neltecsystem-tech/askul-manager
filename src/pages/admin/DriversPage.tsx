@@ -112,7 +112,10 @@ export default function DriversPage() {
     { seq: string; name: string; email: string; password: string }[]
   >([]);
   const [showInactive, setShowInactive] = useState(false);
-  const [accCompanies, setAccCompanies] = useState<string[]>([]); // 会計マスタの会社正式名称(会社名プルダウン用)
+  // 会計マスタの法人名(会社名プルダウン用)。null=取得前/失敗。表記ゆれ防止のためここに無い名前は新規に選ばせない
+  const [accCompanies, setAccCompanies] = useState<AccCompany[] | null>(null);
+  const [accCompaniesError, setAccCompaniesError] = useState<string | null>(null);
+  const [registeringCompany, setRegisteringCompany] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -136,23 +139,96 @@ export default function DriversPage() {
 
   useEffect(() => {
     load();
-    // 会計マスタ(acc_invoice_partners)の会社正式名称リストを取得(会社名は正式名称から選択させる)
-    fetch('https://nccognptoprhwsbjnwcu.supabase.co/functions/v1/list-invoice-companies', {
-      headers: { Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jY29nbnB0b3ByaHdzYmpud2N1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNDU0NDEsImV4cCI6MjA4OTkyMTQ0MX0.M3h31uPyKYWlNevVW3OvZOonoTidC1KLZ04sB5nRKzU' },
-    })
-      .then((r) => r.json())
-      .then((d) => setAccCompanies(((d?.companies ?? []) as { name: string }[]).map((c) => String(c.name || '')).filter(Boolean)))
-      .catch(() => {});
+    loadAccCompanies();
   }, []);
 
-  // 会社名プルダウン(会計マスタ正式名称)。全フォーム共通の datalist。
-  const accCompaniesDatalist = (
-    <datalist id="acc-companies">
-      {accCompanies.map((n) => (
-        <option key={n} value={n} />
-      ))}
-    </datalist>
-  );
+  // 会計マスタ(acc_invoice_partners)の法人名リストを取得(会社名は会計マスタの名前からしか選ばせない)
+  const loadAccCompanies = async (): Promise<boolean> => {
+    try {
+      const r = await fetch(ACC_COMPANIES_URL, { headers: ACC_HEADERS });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !Array.isArray(d?.companies)) throw new Error(d?.error || `HTTP ${r.status}`);
+      const list = (d.companies as { name?: string; pending?: boolean }[])
+        .map((c) => ({ name: String(c.name || ''), pending: !!c.pending }))
+        .filter((c) => c.name)
+        .sort((x, y) => x.name.localeCompare(y.name, 'ja'));
+      setAccCompanies(list);
+      setAccCompaniesError(null);
+      return true;
+    } catch (e) {
+      setAccCompaniesError(e instanceof Error ? e.message : String(e));
+      return false;
+    }
+  };
+
+  // マスタに無い法人を会計へ仮登録して、そのまま選べるようにする(existed=表記違い含め既存があった)
+  const registerCompany = async (onPicked: (name: string) => void) => {
+    const name = window.prompt('会計マスタに登録する法人名(正式名称)を入力してください')?.trim();
+    if (!name) return;
+    setRegisteringCompany(true);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) throw new Error('ログインセッションが切れています。再ログインしてください');
+      const r = await fetch(ACC_COMPANIES_URL, {
+        method: 'POST',
+        headers: { ...ACC_HEADERS, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register', name, tool: 'askul', user_token: token }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d?.ok) throw new Error(d?.error || `HTTP ${r.status}`);
+      const picked = String(d.name || name);
+      await loadAccCompanies();
+      onPicked(picked);
+      alert(
+        d.existed
+          ? `既に登録済みの「${picked}」を選びました`
+          : `「${picked}」を仮登録しました。会計で正式登録されるまで(仮)と表示されます`,
+      );
+    } catch (e) {
+      alert(`法人の登録に失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRegisteringCompany(false);
+    }
+  };
+
+  // 会社名の選択欄(新規・編集共通)。自由入力は表記ゆれの元なので select のみ
+  const renderCompanySelect = (value: string, onChange: (name: string) => void) => {
+    if (accCompanies === null) {
+      // 取得失敗/取得中は今の値のまま保存する(勝手に空にしない)
+      return (
+        <div style={{ fontSize: 12, color: accCompaniesError ? '#b91c1c' : '#6b7280' }}>
+          {accCompaniesError
+            ? `会計マスタの法人名を取得できませんでした(${accCompaniesError})。現在の値「${value || '未所属'}」のまま保存されます`
+            : '会計マスタの法人名を読み込み中…'}
+        </div>
+      );
+    }
+    // 旧表記(マスタに無い名前)は選択肢として残し、他項目だけ直して保存しても消えないようにする
+    const unknown = value && !accCompanies.some((c) => c.name === value) ? value : null;
+    return (
+      <>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <select style={{ ...input, flex: 1 }} value={value} onChange={(e) => onChange(e.target.value)}>
+            <option value="">(未所属)</option>
+            {unknown && <option value={unknown}>⚠ {unknown}(会計マスタに無い表記)</option>}
+            {accCompanies.map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.pending ? `${c.name}(仮)` : c.name}
+              </option>
+            ))}
+          </select>
+          <button type="button" style={btn} disabled={registeringCompany} onClick={() => registerCompany(onChange)}>
+            {registeringCompany ? '登録中…' : '＋法人新規登録'}
+          </button>
+        </div>
+        {unknown && <span style={{ fontSize: 11, color: '#b91c1c' }}>会計マスタの名前に選び直してください</span>}
+      </>
+    );
+  };
+
+  // NexPort(workchat)の公開anonキー。EFゲートウェイ通過用(登録の権限は user_token 側で判定)
+  const ACC_HEADERS: Record<string, string> = { Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jY29nbnB0b3ByaHdzYmpud2N1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNDU0NDEsImV4cCI6MjA4OTkyMTQ0MX0.M3h31uPyKYWlNevVW3OvZOonoTidC1KLZ04sB5nRKzU' };
 
   const officeName = (id: string | null) =>
     id ? offices.find((o) => o.id === id)?.name ?? '(不明)' : '—';
@@ -792,17 +868,12 @@ export default function DriversPage() {
                 </select>
               </label>
               {(creating.business_type === 'corporation' || creating.business_type === 'corporation_owner') && (
-                <label style={labelStyle}>
+                <div style={labelStyle}>
                   所属会社名（会計マスタから選択）
-                  <input
-                    style={input}
-                    list="acc-companies"
-                    value={creating.company_name}
-                    onChange={(e) => setCreating({ ...creating, company_name: e.target.value })}
-                    placeholder="クリックで候補表示（正式名称を選択）"
-                  />
-                  {accCompaniesDatalist}
-                </label>
+                  {renderCompanySelect(creating.company_name, (name) =>
+                    setCreating((c) => (c ? { ...c, company_name: name } : c)),
+                  )}
+                </div>
               )}
               {creating.business_type === 'employee' && (
                 <label style={labelStyle}>
@@ -961,17 +1032,12 @@ export default function DriversPage() {
                 </select>
               </label>
               {(editing.business_type === 'corporation' || editing.business_type === 'corporation_owner') && (
-                <label style={labelStyle}>
+                <div style={labelStyle}>
                   所属会社名（会計マスタから選択）
-                  <input
-                    style={input}
-                    list="acc-companies"
-                    value={editing.company_name}
-                    onChange={(e) => setEditing({ ...editing, company_name: e.target.value })}
-                    placeholder="クリックで候補表示（正式名称を選択）"
-                  />
-                  {accCompaniesDatalist}
-                </label>
+                  {renderCompanySelect(editing.company_name, (name) =>
+                    setEditing((c) => (c ? { ...c, company_name: name } : c)),
+                  )}
+                </div>
               )}
               {editing.business_type === 'employee' && (
                 <label style={labelStyle}>
@@ -1058,6 +1124,9 @@ export default function DriversPage() {
 }
 
 const sectionTitle = { fontSize: 14, margin: '0 0 12px', color: '#374151' };
+type AccCompany = { name: string; pending: boolean };
+const ACC_COMPANIES_URL = 'https://nccognptoprhwsbjnwcu.supabase.co/functions/v1/list-invoice-companies';
+
 const labelStyle = { display: 'flex', flexDirection: 'column' as const, gap: 4, fontSize: 12 };
 const hint = { fontSize: 11, color: '#6b7280' };
 const modal = {
