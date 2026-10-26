@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { RetireBadge, RetireSection, useRetirements } from '../../components/RetireSection';
 import { supabase } from '../../lib/supabase';
 import type { BusinessType, Office, Profile, Role } from '../../types/db';
 import { businessTypeLabels } from '../../types/db';
@@ -116,6 +117,9 @@ export default function DriversPage() {
   const [accCompanies, setAccCompanies] = useState<AccCompany[] | null>(null);
   const [accCompaniesError, setAccCompaniesError] = useState<string | null>(null);
   const [registeringCompany, setRegisteringCompany] = useState(false);
+
+  // 🚪 退職予定(全ツール共通・NexPort の staff_retirements)
+  const retire = useRetirements();
 
   const load = async () => {
     setLoading(true);
@@ -520,7 +524,7 @@ export default function DriversPage() {
 
   const renderRow = (p: Profile) => (
     <tr key={p.id}>
-      <td style={td}>{p.full_name || '(未設定)'}</td>
+      <td style={td}>{p.full_name || '(未設定)'}<RetireBadge r={retire.map[p.id]} /></td>
       <td style={{ ...td, color: '#6b7280' }}>{emails[p.id] ?? '—'}</td>
       <td style={td}>
         {p.business_type ? businessTypeLabels[p.business_type] : '—'}
@@ -657,7 +661,7 @@ export default function DriversPage() {
                 .filter((r) => r.must_change_password)
                 .map((p) => (
                   <tr key={p.id}>
-                    <td style={td}>{p.full_name || '(未設定)'}</td>
+                    <td style={td}>{p.full_name || '(未設定)'}<RetireBadge r={retire.map[p.id]} /></td>
                     <td style={{ ...td, color: '#6b7280' }}>{emails[p.id] ?? '—'}</td>
                     <td style={td}>{officeName(p.office_id)}</td>
                     <td style={td}>
@@ -742,7 +746,7 @@ export default function DriversPage() {
               <tbody>
                 {inactives.map((p) => (
                   <tr key={p.id} style={{ color: '#6b7280' }}>
-                    <td style={td}>{p.full_name || '(未設定)'}</td>
+                    <td style={td}>{p.full_name || '(未設定)'}<RetireBadge r={retire.map[p.id]} /></td>
                     <td style={{ ...td, color: '#6b7280' }}>{emails[p.id] ?? '—'}</td>
                     <td style={td}>
                       {p.business_type ? businessTypeLabels[p.business_type] : '—'}
@@ -1107,6 +1111,7 @@ export default function DriversPage() {
                 />
                 有効（チェックを外すとログイン不可＆シフト編成対象外）
               </label>
+              <RetireSection driverId={editing.id} r={retire.map[editing.id]} onChanged={retire.reload} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
               <button style={btn} onClick={() => setEditing(null)} disabled={busy}>
