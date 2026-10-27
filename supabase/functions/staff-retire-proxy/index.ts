@@ -29,10 +29,11 @@ Deno.serve(async (req: Request) => {
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const { data: userData, error: userErr } = await admin.auth.getUser(token);
     if (userErr || !userData.user) return json({ error: 'ユーザー特定失敗' }, 401);
-    const { data: caller } = await admin.from('profiles').select('role, active, full_name, can_retire').eq('id', userData.user.id).maybeSingle();
+    const { data: caller } = await admin.from('profiles').select('role, active, full_name, can_retire, business_type').eq('id', userData.user.id).maybeSingle();
     if (!caller || caller.role !== 'admin' || !caller.active) return json({ error: '管理者権限がありません' }, 403);
     // 2026-10-27 退職予定はユーザー編集で「🚪 退職予定」の権限(can_retire)を付けた人だけ
-    if (!caller.can_retire) return json({ error: '退職予定の権限がありません', code: 'NO_RETIRE_PERMISSION' }, 403);
+    // 社員(business_type=employee)は設定しなくても可
+    if (!caller.can_retire && caller.business_type !== 'employee') return json({ error: '退職予定の権限がありません', code: 'NO_RETIRE_PERMISSION' }, 403);
 
     const body = await req.json().catch(() => ({} as any));
     const action = String(body.action || '');

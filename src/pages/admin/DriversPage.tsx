@@ -121,7 +121,7 @@ export default function DriversPage() {
 
   // 🚪 退職予定(全ツール共通・NexPort の staff_retirements)
   // 権限(can_retire)が無い人には読まない・見せない
-  const canRetire = !!me?.can_retire;
+  const canRetire = !!me?.can_retire || me?.business_type === 'employee';   // 社員は設定しなくても可
   const retire = useRetirements(canRetire);
 
   const load = async () => {
@@ -1121,8 +1121,8 @@ export default function DriversPage() {
                 const canGrant = canRetire || !rows.some((r) => r.can_retire);
                 return (
                   <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: 8, opacity: canGrant ? 1 : 0.5 }} title={canGrant ? '' : 'この権限を持っている人だけが付けられます'}>
-                    <input type="checkbox" checked={editing.can_retire} disabled={!canGrant} onChange={(e) => setEditing({ ...editing, can_retire: e.target.checked })} />
-                    🚪 退職予定の登録・表示ができる（全ツール共通の退職予定）
+                    <input type="checkbox" checked={editing.can_retire || editing.business_type === 'employee'} disabled={!canGrant || editing.business_type === 'employee'} onChange={(e) => setEditing({ ...editing, can_retire: e.target.checked })} />
+                    🚪 退職予定の登録・表示ができる（全ツール共通の退職予定）{editing.business_type === 'employee' ? '　※社員は設定しなくても可' : ''}
                   </label>
                 );
               })()}
