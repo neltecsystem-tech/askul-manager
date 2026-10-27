@@ -1144,5 +1144,6 @@ const modal = {
     justifyContent: 'center',
     zIndex: 10,
   },
-  modal: { background: '#fff', borderRadius: 6, padding: 20, width: 440, maxWidth: '90vw' },
+  // 2026-10-27 縦に長いとき(退職予定の欄など)に下が切れて押せなかったので、画面の高さの9割までにしてスクロールさせる
+  modal: { background: '#fff', borderRadius: 6, padding: 20, width: 440, maxWidth: '90vw', maxHeight: '90vh', overflowY: 'auto' as const },
 };
