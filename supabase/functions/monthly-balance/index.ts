@@ -338,8 +338,20 @@ Deno.serve(async (req: Request) => {
     const profit_rate = revenue_invoice > 0 ? (profit / revenue_invoice) * 100 : 0;
     const invoice = Math.round(revenue_invoice * 1.1);
 
+    // 物量(2026-10-27・NexPort 収支シミュレーターの「コースを設計する」用): 配送実績の個数と、延べ人日(ドライバー×日)・稼働日数
+    const vDays = new Set<string>(), vDriverDays = new Set<string>();
+    let vQty = 0;
+    for (const r of deliveries) {
+      if (!(r.quantity > 0)) continue;
+      vQty += r.quantity;
+      vDays.add(r.work_date);
+      vDriverDays.add(`${r.driver_code || driverNameKey(r.driver_name)}|${r.work_date}`);
+    }
+    const volume = { quantity: vQty, days: vDays.size, driver_days: vDriverDays.size };
+
     return json({
       period: { from, to },
+      volume,
       revenue: revenue_invoice,  // 画面「総売上(税抜)」 = アスクル請求の税抜 (シートP列ライブ集計)
       payment,
       driver_payment,
