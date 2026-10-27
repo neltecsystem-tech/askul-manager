@@ -10,6 +10,7 @@ export type Retirement = {
   site: string | null; created_from: string | null; created_by_name: string | null; created_at: string;
   updated_by_name: string | null; updated_at: string; processed_at: string | null;
   askul_profile_id: string | null; delivery_profile_id: string | null;
+  needs_replacement?: boolean;   // 補填が必要(面談シートの不足人員に足す)
   shifts_after?: { tool: string; what: string; count: number }[];
 };
 const REASONS = ['自己都合', '契約終了', 'その他'] as const;
@@ -68,15 +69,16 @@ export function RetireSection({ driverId, r, onChanged }: { driverId: string; r?
   const [date, setDate] = useState(r?.retire_date ?? '');
   const [reason, setReason] = useState<Retirement['reason']>(r?.reason ?? '自己都合');
   const [note, setNote] = useState(r?.note ?? '');
+  const [needs, setNeeds] = useState<boolean>(r?.needs_replacement ?? true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  useEffect(() => { setDate(r?.retire_date ?? ''); setReason(r?.reason ?? '自己都合'); setNote(r?.note ?? ''); setMsg(null); }, [r?.id, r?.updated_at, driverId]);
+  useEffect(() => { setDate(r?.retire_date ?? ''); setReason(r?.reason ?? '自己都合'); setNote(r?.note ?? ''); setNeeds(r?.needs_replacement ?? true); setMsg(null); }, [r?.id, r?.updated_at, driverId]);
 
   const save = async () => {
     if (!date) { setMsg('退職日（最終勤務日）を入れてください'); return; }
     setBusy(true); setMsg(null);
     try {
-      const j = await callProxy({ action: 'set', driver_id: driverId, retire_date: date, reason, note });
+      const j = await callProxy({ action: 'set', driver_id: driverId, retire_date: date, reason, note, needs_replacement: needs });
       const w = (j.row?.shifts_after ?? []) as Retirement['shifts_after'];
       setMsg(w && w.length ? `登録しました。⚠ ${w.map((x) => x.what).join('／')}` : '登録しました。全ツール共通で表示されます。');
       onChanged();
@@ -112,6 +114,10 @@ export function RetireSection({ driverId, r, onChanged }: { driverId: string; r?
         </label>
         <label style={{ ...lbl, flex: 1, minWidth: 160 }}>メモ<input style={inp} value={note} onChange={(e) => setNote(e.target.value)} placeholder="任意" /></label>
       </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+        <input type="checkbox" checked={needs} onChange={(e) => setNeeds(e.target.checked)} />
+        補填が必要（NexPort 面談シートの「不足人員」に1人足す）
+      </label>
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="button" style={btnP} disabled={busy} onClick={save}>{busy ? '処理中…' : r ? '退職予定を更新' : '退職予定を登録'}</button>
         {r && <button type="button" style={btnD} disabled={busy} onClick={cancel}>取り消し</button>}
