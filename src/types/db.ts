@@ -10,6 +10,7 @@ export const businessTypeLabels: Record<BusinessType, string> = {
 };
 
 export interface Profile {
+  can_retire?: boolean;   // 🚪 退職予定の登録・表示の権限(2026-10-27)
   id: string;
   full_name: string;
   role: Role;

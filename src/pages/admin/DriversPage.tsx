@@ -73,6 +73,7 @@ interface EditDriver {
   phone: string;
   valid_from: string;
   valid_to: string;
+  can_retire: boolean;
 }
 
 /**
@@ -119,7 +120,9 @@ export default function DriversPage() {
   const [registeringCompany, setRegisteringCompany] = useState(false);
 
   // 🚪 退職予定(全ツール共通・NexPort の staff_retirements)
-  const retire = useRetirements();
+  // 権限(can_retire)が無い人には読まない・見せない
+  const canRetire = !!me?.can_retire;
+  const retire = useRetirements(canRetire);
 
   const load = async () => {
     setLoading(true);
@@ -312,6 +315,7 @@ export default function DriversPage() {
         phone: editing.phone.trim() || null,
         valid_from: editing.valid_from || null,
         valid_to: editing.valid_to || null,
+        can_retire: editing.can_retire,
       })
       .eq('id', editing.id);
     if (profileErr) {
@@ -495,6 +499,7 @@ export default function DriversPage() {
       phone: (p as { phone?: string | null }).phone ?? '',
       valid_from: p.valid_from ?? '',
       valid_to: p.valid_to ?? '',
+      can_retire: !!p.can_retire,
     });
 
   // 一覧には「有効」だけを出す。無効(退任・契約終了)は下部の「無効一覧」に隔離し、そこから再有効化する。
@@ -1111,7 +1116,17 @@ export default function DriversPage() {
                 />
                 有効（チェックを外すとログイン不可＆シフト編成対象外）
               </label>
-              <RetireSection driverId={editing.id} r={retire.map[editing.id]} onChanged={retire.reload} />
+              {editing.role === 'admin' && (() => {
+                // 権限を付けられるのは、この権限を持っている人。まだ誰も持っていない間は管理者なら付けられる(最初の1人を決めるため)
+                const canGrant = canRetire || !rows.some((r) => r.can_retire);
+                return (
+                  <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: 8, opacity: canGrant ? 1 : 0.5 }} title={canGrant ? '' : 'この権限を持っている人だけが付けられます'}>
+                    <input type="checkbox" checked={editing.can_retire} disabled={!canGrant} onChange={(e) => setEditing({ ...editing, can_retire: e.target.checked })} />
+                    🚪 退職予定の登録・表示ができる（全ツール共通の退職予定）
+                  </label>
+                );
+              })()}
+              {canRetire && <RetireSection driverId={editing.id} r={retire.map[editing.id]} onChanged={retire.reload} />}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
               <button style={btn} onClick={() => setEditing(null)} disabled={busy}>

@@ -29,17 +29,18 @@ async function callProxy(payload: Record<string, unknown>) {
 }
 
 /** 退職予定の一覧(このツールのドライバーID → 退職予定) */
-export function useRetirements() {
+export function useRetirements(enabled = true) {
   const [map, setMap] = useState<Record<string, Retirement>>({});
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(async () => {
+    if (!enabled) { setMap({}); return; }   // 権限が無い人には読まない・見せない
     try {
       const j = await callProxy({ action: 'list' });
       const m: Record<string, Retirement> = {};
       for (const r of (j.rows ?? []) as Retirement[]) if (r[ID_FIELD]) m[r[ID_FIELD]!] = r;
       setMap(m); setError(null);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-  }, []);
+  }, [enabled]);
   useEffect(() => { reload(); }, [reload]);
   return { map, error, reload };
 }
