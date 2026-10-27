@@ -347,7 +347,19 @@ Deno.serve(async (req: Request) => {
       vDays.add(r.work_date);
       vDriverDays.add(`${r.driver_code || driverNameKey(r.driver_name)}|${r.work_date}`);
     }
-    const volume = { quantity: vQty, days: vDays.size, driver_days: vDriverDays.size };
+    // 単価別(金額 ÷ 個数。円単位に丸める)の個数と金額(2026-10-27・NexPort で「金額別の物量」を出すため)
+    const byPrice = new Map<number, { quantity: number; amount: number }>();
+    for (const r of deliveries) {
+      if (!(r.quantity > 0)) continue;
+      const price = Math.round(r.amount / r.quantity);
+      const b = byPrice.get(price) ?? { quantity: 0, amount: 0 };
+      b.quantity += r.quantity; b.amount += r.amount;
+      byPrice.set(price, b);
+    }
+    const volume = {
+      quantity: vQty, days: vDays.size, driver_days: vDriverDays.size,
+      by_price: [...byPrice.entries()].map(([price, b]) => ({ price, quantity: b.quantity, amount: b.amount })).sort((a, b) => a.price - b.price),
+    };
 
     return json({
       period: { from, to },
