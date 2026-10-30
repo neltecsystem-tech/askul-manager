@@ -391,6 +391,14 @@ export default function DriversPage() {
       alert('自分自身は削除できません');
       return;
     }
+    // 🛡 2026-10-30: 支払明細・稼働記録・配送実績がある人は完全削除しない(DBのトリガーでも止まる)。
+    //    金子伸也を完全削除したとき、確定済みの8・9月の支払明細まで一緒に消え、会計とずれた。
+    const cnt = async (t: string) => (await supabase.from(t).select('id', { count: 'exact', head: true }).eq('driver_id', p.id)).count ?? 0;
+    const [nCps, nWork, nDeliv] = await Promise.all([cnt('closed_payment_statements'), cnt('work_records'), cnt('delivery_records')]);
+    if (nCps + nWork + nDeliv > 0) {
+      alert(`「${p.full_name || '(未設定)'}」は完全削除できません。\n\n支払明細 ${nCps}件・稼働記録 ${nWork}件・配送実績 ${nDeliv}件があります。\n契約終了・退任は「編集」で【有効】のチェックを外してください（過去の支払根拠と明細を残すため）。`);
+      return;
+    }
     // 退任・契約終了なら「削除」ではなく「無効」にするのが正しい。
     // 削除するとシフト割当と控除率履歴まで消え、過去の支払根拠が追えなくなる。
     // 誤って消されやすいので、ここで無効化を先に案内する。
@@ -400,13 +408,15 @@ export default function DriversPage() {
       `　 無効にすると、シフト・稼働登録・締めなどの画面から外れ、本人もログインできなくなります。\n` +
       `　 マスタと過去の記録はそのまま残るため、後から支払根拠を確認できます。\n\n` +
       `このまま削除した場合:\n` +
-      `・profile / auth ユーザーが削除されます\n` +
+      `・profile / auth ユーザーが削除されます（支払明細・稼働記録・配送実績がある人は削除できません）\n` +
       `・シフト割当 / 控除率履歴 も連動削除されます（過去の支払根拠が追えなくなります）\n` +
       `・配送実績 / 立替金 は記録は残り、ドライバー欄が空欄になります\n\n` +
       `※この操作は取り消せません。続行しますか？`;
     if (!confirm(msg)) return;
     setError(null);
     setBusy(true);
+    // 誰が削除を依頼したかを残す(削除そのものは関数がサービスキーで行うため、DB側では操作した人が分からない)
+    await supabase.from('profile_audit').insert({ action: 'delete_requested', profile_id: p.id, full_name: p.full_name, actor: me?.id, actor_name: me?.full_name ?? null });
     const { data, error } = await supabase.functions.invoke('delete-driver', {
       body: { user_id: p.id },
     });
