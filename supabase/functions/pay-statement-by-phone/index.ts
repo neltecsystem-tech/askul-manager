@@ -148,6 +148,11 @@ async function noticePublished(nx: any, profileId: string, ym: string): Promise<
 async function isNeltecStaff(caller: any): Promise<boolean> {
   if (!caller) return false;
   if (caller.role === 'super_admin') return true;         // 保守用に常に許可
+  // 税理士など閲覧専用アカウント(NexPort acc_auditors)は全員分を見られる(2026-11-09)
+  try {
+    const { data: aud } = await caller.nx.from('acc_auditors').select('user_id').eq('user_id', caller.user_id).maybeSingle();
+    if (aud) return true;
+  } catch (_) { /* 確かめられないときは通常の判定へ */ }
   if (caller.role !== 'admin') return false;
   try {
     const or = [`profile_id.eq.${caller.user_id}`, caller.phone ? `phone.eq.${caller.phone}` : ''].filter(Boolean).join(',');
