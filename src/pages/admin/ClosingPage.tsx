@@ -2115,6 +2115,16 @@ function BtobCsvModal({
       lines,
     );
     saveAs(toShiftJisBlob(csv), `請求書_${invoiceNo}.csv`);
+    // 同じ数字で BtoBプラットフォームの請求書(おもて)と同じ形の PDF を作り、会計の共有ドライブ「財務資料/売掛金/売上請求書」へ保管する(2026-11-10)
+    // 中継EF invoice-pdf-proxy がアスクルの管理者かを確かめて NexPort の source-docs へ渡す。失敗してもCSVは出ている
+    const t = btobInvoiceTotals(lines);
+    const untaxed = lines.filter((l) => (l.taxClass ?? '課税') === '非課税').reduce((n, l) => n + l.amount, 0);
+    void supabase.functions.invoke('invoice-pdf-proxy', {
+      body: { invoice: { invoice_no: invoiceNo, client_code: partnerCode, client_name: 'ASKUL LOGIST 株式会社', subject, closing_date: closingDate, due_date: dueDate, net: t.net, tax: t.tax, gross: t.gross, untaxed } },
+    }).then(({ data, error }) => {
+      if (error || data?.error) alert('⚠ 請求書PDFの保管に失敗しました: ' + (data?.error ?? error?.message));
+      else alert('📄 請求書PDFを保管しました（財務資料/売掛金/売上請求書: ' + data.made.file + '）' + (data.made.client_registered ? '' : '\n⚠ 請求先の住所が会計に未登録です（会計の設定→BtoB請求書の取引先で登録）'));
+    });
   };
 
   const field = (label: string, value: string, set: (v: string) => void, ph = '', type = 'text') => (
