@@ -98,6 +98,10 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// 🛡 2026-11-11: ドライバーの「削除」ボタンは出さない。退任・契約終了は「編集」で無効にする(金子伸也の完全削除で確定済みの明細まで消えた件の再発防止)。
+//    どうしても消す必要があるときだけ true にする。DB側の削除ガード(明細・稼働・配送がある人は消せない)は別にかかっている。
+const SHOW_DELETE = false;
+
 export default function DriversPage() {
   const { profile: me } = useAuth();
   const [rows, setRows] = useState<Profile[]>([]);
@@ -562,7 +566,7 @@ export default function DriversPage() {
         <button style={{ ...btn, marginLeft: 4 }} onClick={() => toggleRole(p)}>
           {p.role === 'admin' ? 'ドライバーへ' : '管理者へ'}
         </button>
-        {p.id !== me?.id && (
+        {SHOW_DELETE && p.id !== me?.id && (
           <button
             style={{ ...btnDanger, marginLeft: 4 }}
             onClick={() => deleteDriver(p)}
@@ -782,7 +786,7 @@ export default function DriversPage() {
                       <button style={{ ...btn, marginLeft: 4 }} onClick={() => startEdit(p)}>
                         編集
                       </button>
-                      {p.id !== me?.id && (
+                      {SHOW_DELETE && p.id !== me?.id && (
                         <button
                           style={{ ...btnDanger, marginLeft: 4 }}
                           onClick={() => deleteDriver(p)}
