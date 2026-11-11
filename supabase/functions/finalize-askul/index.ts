@@ -423,7 +423,11 @@ Deno.serve(async (req) => {
     const summary = results.map((r) => ({ name: r._name, revenue: r.revenue, kodate_total: r.kodate_total, vehicle_total: r.vehicle_total, deduction_rate: r.deduction_rate, deduction_amount: r.deduction_amount, payment_amount: r.payment_amount }));
 
     if (dryRun) {
-      return json({ ok: true, dry_run: true, year, month, period: { from: dateFrom, to: dateTo }, count: results.length, grand, drivers: summary, unregistered, excluded_employees: excludedEmployees, alert: alertResult });
+      // include_rows_for: 指定した driver_id の明細の中身(日別・件数明細つき)も返す。書き込みはしない。
+      //   1人分だけ作り直すとき用(2026-11-11 金子伸也の削除で消えた明細の復元)。全員分の upsert を走らせずに済む。
+      const only = Array.isArray(body.include_rows_for) ? new Set((body.include_rows_for as unknown[]).map(String)) : null;
+      const rows = only ? results.filter((r) => only.has(String(r.driver_id))).map(({ _name, ...r }) => r) : undefined;
+      return json({ ok: true, dry_run: true, year, month, period: { from: dateFrom, to: dateTo }, count: results.length, grand, drivers: summary, unregistered, excluded_employees: excludedEmployees, alert: alertResult, rows });
     }
 
     // 反映済みロック + upsert。force=true(変更を反映ボタン)は反映済みでも上書き再確定。
