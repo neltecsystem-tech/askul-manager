@@ -284,7 +284,7 @@ Deno.serve(async (req: Request) => {
     const nkey = nmKey(nameInput);
     const ckey = coKey(companyInput);
     const matched = byCompany
-      ? (profiles ?? []).filter((p) => ckey && coKey(String(p.company_name ?? '')).includes(ckey))
+      ? (profiles ?? []).filter((p) => ckey && coKey(String(p.company_name ?? '')) === ckey) // 🔒 M10/M26: 部分一致だと他社名を含む社名の明細まで返る。権限確認と同じ完全一致に
       : byName
       ? (profiles ?? []).filter((p) => nmKey(String(p.full_name ?? '')) === nkey)
       : (profiles ?? []).filter((p) => normalizePhone(String(p.phone ?? '')) === phoneInput);
