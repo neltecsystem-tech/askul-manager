@@ -204,7 +204,10 @@ Deno.serve(async (req) => {
     }
     // NexPort管理者JWT(ビューアの「変更を反映」ボタン)でも書込を許可
     if (!authorized && body.auth_token) authorized = await isNexportAdmin(String(body.auth_token));
-    if (!dryRun && !authorized) return json({ error: '書込(確定/反映)は権限がありません。cron/管理者のみ。', code: 'FORBIDDEN' }, 403);
+    // 🚨 試し計算(dry_run)も認証必須。dry_run は全ドライバーの氏名・支払額(include_rows_for なら日別明細)を返すため、
+    //    以前は鍵なしで誰でも取れた(verify_jwt=false・2026-11-13 セキュリティ点検 C1 で判明)。
+    //    正規の呼び出し元(cron=service_role / 明細ビューア=管理者JWT)はどちらも認証付き。
+    if (!authorized) return json({ error: '権限がありません。cron/管理者のみ。', code: 'FORBIDDEN' }, 403);
 
     // 反映の取り残しを拾う(月指定なし): 未反映の行がある月を全部見て、締めが終わった月を反映する。
     // 🚨 反映が「月末1回きり」だと、確定がそれより後になった月は永久に取り残される。
