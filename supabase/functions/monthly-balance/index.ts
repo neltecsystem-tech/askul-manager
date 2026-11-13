@@ -91,15 +91,29 @@ async function fetchSheet(range: string, token: string): Promise<(string | numbe
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const body = (await req.json().catch(() => ({}))) as { from?: string; to?: string };
-    const from = body.from ?? '';
-    const to = body.to ?? '';
-    if (!from || !to) return json({ error: 'from / to required (YYYY-MM-DD)' }, 400);
-
     const admin = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
+
+    // 🚨 アスクル管理者のログインを必須にする。以前は確認が無く、公開 anon キーだけで会社の収支・
+    //    ドライバー別の支払が取れた(2026-11-13 セキュリティ点検 H13)。正規の呼び出し元は NexPort の
+    //    askul-proxy / acc-sync で、どちらも同期用アカウント(role=admin)でログインして呼ぶ。
+    const bearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+    let allowed = !!bearer && bearer === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!allowed && bearer) {
+      const { data: { user } } = await admin.auth.getUser(bearer);
+      if (user) {
+        const { data: prof } = await admin.from('profiles').select('role, active').eq('id', user.id).maybeSingle();
+        allowed = (prof?.role === 'admin' || prof?.role === 'super_admin') && prof?.active !== false;
+      }
+    }
+    if (!allowed) return json({ error: '権限がありません(アスクル管理者のみ)', code: 'FORBIDDEN' }, 403);
+
+    const body = (await req.json().catch(() => ({}))) as { from?: string; to?: string };
+    const from = body.from ?? '';
+    const to = body.to ?? '';
+    if (!from || !to) return json({ error: 'from / to required (YYYY-MM-DD)' }, 400);
 
     // 確定済み支払明細の年月キー (ClosingPage の「支払明細書を確定」と同じく 期間終了日の年月)
     const closedYear = parseInt(to.slice(0, 4));
