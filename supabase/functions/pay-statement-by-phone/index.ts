@@ -81,11 +81,12 @@ async function authorizeCaller(authToken: string | undefined): Promise<any | nul
   //    本人が手入力する値で、空だったり桁が壊れていることがある(先頭0落ち・9桁など)。
   //    明細は phone の完全一致で引くため、そうなると本人には「明細がありません」としか
   //    見えない。使える形でなければ中央人材マスタ(profile_id で紐付く)を採る。
-  let phone = normalizePhone(profile.phone || '');
-  if (phone.length < 10) {
-    const { data: sm } = await nx.from('staff_master').select('phone').eq('profile_id', user.id).not('phone', 'is', null).limit(1);
-    phone = normalizePhone(String((sm ?? [])[0]?.phone ?? ''));
-  }
+  // 🔒 2026-11-13 セキュリティ点検 H15: 中央人材マスタ(本人は書き換えられない)を先に見る。
+  //    profiles.phone は本人が自由に書き換えられるので、他人の番号にすると他人の明細が見えた。
+  //    マスタに使える番号が無い人だけ profiles.phone を使う(従来どおり)。
+  const { data: sm } = await nx.from('staff_master').select('phone').eq('profile_id', user.id).not('phone', 'is', null).limit(1);
+  let phone = normalizePhone(String((sm ?? [])[0]?.phone ?? ''));
+  if (phone.length < 10) phone = normalizePhone(profile.phone || '');
   return {
     user_id: user.id,
     role: profile.role || '',
