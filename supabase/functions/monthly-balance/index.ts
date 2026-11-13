@@ -105,7 +105,9 @@ Deno.serve(async (req: Request) => {
       const { data: { user } } = await admin.auth.getUser(bearer);
       if (user) {
         const { data: prof } = await admin.from('profiles').select('role, active').eq('id', user.id).maybeSingle();
-        allowed = (prof?.role === 'admin' || prof?.role === 'super_admin') && prof?.active !== false;
+        // 🚨 active は見ない。NexPort の同期用アカウント(acc-sync / askul-proxy が使う)は role=admin だが
+        //    active=false(ドライバー一覧に出さないため)。active を条件にすると収支の連携が全部止まる(2026-11-13 実際に止めた)。
+        allowed = prof?.role === 'admin' || prof?.role === 'super_admin';
       }
     }
     if (!allowed) return json({ error: '権限がありません(アスクル管理者のみ)', code: 'FORBIDDEN' }, 403);
