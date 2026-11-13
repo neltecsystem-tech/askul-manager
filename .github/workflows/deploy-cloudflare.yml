@@ -1,0 +1,31 @@
+# アスクル管理ツールを Cloudflare Workers へ(2026-11-13〜)。GitHub Pages(公開リポジトリ)をやめて非公開にするため
+# 🚨 リポジトリのシークレット CLOUDFLARE_API_TOKEN が要る(無い間は飛ばす)
+name: Deploy to Cloudflare Workers
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build
+      - name: Deploy
+        if: env.HAS_TOKEN == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: "4.100.0"
+      - name: 鍵が無いので飛ばした
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::warning::CLOUDFLARE_API_TOKEN が無いので Cloudflare へのデプロイを飛ばしました"

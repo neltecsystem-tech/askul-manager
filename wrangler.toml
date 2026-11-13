@@ -1,0 +1,7 @@
+# アスクル管理ツール(2026-11-13 GitHub Pages から移す)。公開リポジトリをやめて非公開にするため
+name = "askul-manager"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
